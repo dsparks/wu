@@ -1,8 +1,7 @@
-/* NWS Forecast Viewer — v2
- * Fixes:
- *  - No weird vertical stretching: parent has fixed height; canvas fills it; animations off.
- *  - Hover works even when Chart.js doesn't select elements: manual nearest-x readout.
- *  - Styling nudged toward WUnderground.
+/* NWS Forecast Viewer — v3
+ * - Container guarded with contain+overflow and min/max-height to stop runaway resize.
+ * - hoverReadout moved outside chart container.
+ * - Still responsive width; fixed 520px height.
  */
 
 const els = {
@@ -16,8 +15,8 @@ const els = {
   myLocBtn: document.getElementById('useMyLocation'),
 };
 
-let chart; // Chart.js instance
-let lastSeries; // keep series for manual hover
+let chart;
+let lastSeries;
 
 // ---------- Utilities ----------
 const c2f = c => (c == null ? null : (c * 9) / 5 + 32);
@@ -194,83 +193,33 @@ function renderChart(series) {
   const data = {
     labels,
     datasets: [
-      { // Temperature
-        label: 'Temperature (°F)',
-        data: series.temperature,
-        borderColor: getCSS('--temp'),
-        backgroundColor: 'transparent',
-        tension: 0.35, pointRadius: 1.5, yAxisID: 'y', cubicInterpolationMode: 'monotone',
-        spanGaps: true,
-      },
-      { // Dew Point
-        label: 'Dew Point (°F)',
-        data: series.dewpoint,
-        borderColor: getCSS('--dew'),
-        backgroundColor: 'transparent',
-        tension: 0.35, pointRadius: 1, yAxisID: 'y', cubicInterpolationMode: 'monotone',
-        spanGaps: true,
-      },
-      { // Chance of Precip
-        label: 'Chance of Precip (%)',
-        data: series.pop,
-        borderColor: 'transparent',
-        backgroundColor: hexWithAlpha(getCSS('--pop'), 0.35),
-        fill: true, yAxisID: 'yPct',
-      },
-      { // Cloud Cover
-        label: 'Cloud Cover (%)',
-        data: series.cloud,
-        borderColor: 'transparent',
-        backgroundColor: hexWithAlpha(getCSS('--cloud'), 0.25),
-        fill: true, yAxisID: 'yPct',
-      },
-      { // Humidity
-        label: 'Humidity (%)',
-        data: series.humidity,
-        borderColor: getCSS('--hum'),
-        backgroundColor: 'transparent',
-        tension: 0.2, pointRadius: 0, yAxisID: 'yPct', spanGaps: true,
-      },
-      { // Wind
-        label: 'Wind (mph)',
-        data: series.wind,
-        borderColor: getCSS('--wind'),
-        backgroundColor: 'transparent',
-        pointRadius: 0, tension: 0.2, yAxisID: 'yWind', spanGaps: true,
-      },
-      { // Pressure
-        label: 'Pressure (inHg)',
-        data: series.pressure,
-        borderColor: getCSS('--press'),
-        backgroundColor: 'transparent',
-        pointRadius: 0, tension: 0.2, yAxisID: 'yPress', spanGaps: true,
-      },
-      { // QPF hourly
-        type: 'bar',
-        label: 'Hourly Liquid (in)',
-        data: series.qpfHourly,
-        backgroundColor: getCSS('--qpf'),
-        yAxisID: 'yQpf',
-        borderWidth: 0,
-        barPercentage: 1.0,
-        categoryPercentage: 1.0,
-      },
-      { // QPF accum
-        label: 'Precip Accum (in)',
-        data: series.qpfAccum,
-        borderColor: getCSS('--qpfacc'),
-        backgroundColor: 'transparent',
-        pointRadius: 0, tension: 0.2, yAxisID: 'yQpf', spanGaps: true,
-      },
+      { label: 'Temperature (°F)', data: series.temperature, borderColor: getCSS('--temp'),
+        backgroundColor: 'transparent', tension: 0.35, pointRadius: 1.5, yAxisID: 'y', cubicInterpolationMode: 'monotone', spanGaps: true },
+      { label: 'Dew Point (°F)', data: series.dewpoint, borderColor: getCSS('--dew'),
+        backgroundColor: 'transparent', tension: 0.35, pointRadius: 1, yAxisID: 'y', cubicInterpolationMode: 'monotone', spanGaps: true },
+      { label: 'Chance of Precip (%)', data: series.pop, borderColor: 'transparent',
+        backgroundColor: hexWithAlpha(getCSS('--pop'), 0.35), fill: true, yAxisID: 'yPct' },
+      { label: 'Cloud Cover (%)', data: series.cloud, borderColor: 'transparent',
+        backgroundColor: hexWithAlpha(getCSS('--cloud'), 0.25), fill: true, yAxisID: 'yPct' },
+      { label: 'Humidity (%)', data: series.humidity, borderColor: getCSS('--hum'),
+        backgroundColor: 'transparent', tension: 0.2, pointRadius: 0, yAxisID: 'yPct', spanGaps: true },
+      { label: 'Wind (mph)', data: series.wind, borderColor: getCSS('--wind'),
+        backgroundColor: 'transparent', pointRadius: 0, tension: 0.2, yAxisID: 'yWind', spanGaps: true },
+      { label: 'Pressure (inHg)', data: series.pressure, borderColor: getCSS('--press'),
+        backgroundColor: 'transparent', pointRadius: 0, tension: 0.2, yAxisID: 'yPress', spanGaps: true },
+      { type: 'bar', label: 'Hourly Liquid (in)', data: series.qpfHourly, backgroundColor: getCSS('--qpf'),
+        yAxisID: 'yQpf', borderWidth: 0, barPercentage: 1.0, categoryPercentage: 1.0 },
+      { label: 'Precip Accum (in)', data: series.qpfAccum, borderColor: getCSS('--qpfacc'),
+        backgroundColor: 'transparent', pointRadius: 0, tension: 0.2, yAxisID: 'yQpf', spanGaps: true },
     ]
   };
 
   const options = {
     responsive: true,
-    maintainAspectRatio: false, // canvas fills parent height
-    resizeDelay: 0,
-    animation: false,           // disable animations to prevent stretch-on-load
+    maintainAspectRatio: false,
+    animation: false,
     interaction: { mode: 'index', intersect: false },
+    resizeDelay: 0,
     plugins: {
       legend: { display: false },
       tooltip: {
@@ -295,44 +244,20 @@ function renderChart(series) {
       }
     },
     scales: {
-      x: {
-        type: 'time',
-        time: { unit: 'hour', tooltipFormat: 'EEE MMM d h a' },
-        ticks: { color: '#9fb0c6' },
-        grid: { color: 'rgba(255,255,255,.06)' }
-      },
-      y: { // °F
-        position:'left',
-        ticks: { color: getCSS('--temp') },
-        grid: { color: 'rgba(255,255,255,.06)' }
-      },
-      yPct: { // %
-        position:'right',
-        min:0, max:100,
-        ticks: { color: '#8fb3ff' }
-      },
-      yWind: {
-        position:'right',
-        ticks: { color: getCSS('--wind') },
-        grid: { display:false }
-      },
-      yPress: {
-        position:'left',
-        ticks: { color: getCSS('--press') },
-        grid: { display:false }
-      },
-      yQpf: {
-        position:'right',
-        ticks: { color: getCSS('--qpf') },
-        grid: { display:false }
-      }
+      x: { type: 'time', time: { unit: 'hour', tooltipFormat: 'EEE MMM d h a' },
+           ticks: { color: '#9fb0c6' }, grid: { color: 'rgba(255,255,255,.06)' } },
+      y: { position:'left', ticks: { color: getCSS('--temp') }, grid: { color: 'rgba(255,255,255,.06)' } },
+      yPct: { position:'right', min:0, max:100, ticks: { color: '#8fb3ff' } },
+      yWind: { position:'right', ticks: { color: getCSS('--wind') }, grid: { display:false } },
+      yPress:{ position:'left', ticks: { color: getCSS('--press') }, grid: { display:false } },
+      yQpf: { position:'right', ticks: { color: getCSS('--qpf') }, grid: { display:false } }
     }
   };
 
   if (chart) chart.destroy();
   chart = new Chart(ctx, { type: 'line', data, options });
 
-  // Manual hover/readout to guarantee behavior even when no elements become 'active'
+  // Manual hover/readout so it always updates
   const updateFromPixel = (evt) => {
     const xScale = chart.scales.x;
     if (!xScale) return;
@@ -340,13 +265,9 @@ function renderChart(series) {
     const x = (evt.touches && evt.touches[0]) ? (evt.touches[0].clientX - rect.left) : (evt.clientX - rect.left);
     const ts = xScale.getValueForPixel(x);
     if (!ts) return;
-    // Find nearest index in tAxis
     const tArr = series.tAxis;
     let lo = 0, hi = tArr.length - 1, mid;
-    while (hi - lo > 1) {
-      mid = (hi + lo) >> 1;
-      if (tArr[mid] < ts) lo = mid; else hi = mid;
-    }
+    while (hi - lo > 1) { mid = (hi + lo) >> 1; if (tArr[mid] < ts) lo = mid; else hi = mid; }
     const idx = (Math.abs(tArr[lo] - ts) < Math.abs(tArr[hi] - ts)) ? lo : hi;
     updateHoverReadout(series, idx);
   };
@@ -383,6 +304,10 @@ async function showForecast(lat, lon, labelOverride){
   els.days.innerHTML = '';
   els.place.textContent = 'Loading…';
   els.updated.textContent = '';
+
+  // As an extra guard, force container height each render
+  const wrap = document.querySelector('.chart-wrap');
+  if (wrap) { wrap.style.height = '520px'; wrap.style.minHeight = '520px'; wrap.style.maxHeight = '520px'; }
 
   try{
     const { place, daily, grid } = await loadByLatLon(lat, lon);

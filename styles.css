@@ -5,16 +5,15 @@
   --muted:#9fb0c6;
   --accent:#7ab8ff;
 
-  /* series colors — tuned toward WUnderground look */
-  --temp:#ff6464;         /* warm red */
-  --dew:#56c271;          /* green */
-  --pop:#5ab0ff;          /* light blue fill */
-  --cloud:#9aa3af;        /* gray fill */
-  --hum:#cddc39;          /* yellow-green line */
-  --press:#1f2937;        /* dark line */
-  --wind:#6f8bff;         /* blue for wind */
-  --qpf:#00c1d4;          /* teal bars */
-  --qpfacc:#0093a6;       /* darker teal line */
+  --temp:#ff6464;
+  --dew:#56c271;
+  --pop:#5ab0ff;
+  --cloud:#9aa3af;
+  --hum:#cddc39;
+  --press:#1f2937;
+  --wind:#6f8bff;
+  --qpf:#00c1d4;
+  --qpfacc:#0093a6;
 }
 
 *{box-sizing:border-box}
@@ -66,17 +65,21 @@ main{padding:1rem; max-width:1100px; margin:0 auto}
 .day .temps .lo{color:var(--muted)}
 .day .desc{color:var(--muted); font-size:.85rem}
 
-/* --- Fix stretch: give parent a fixed height; let canvas fill it --- */
+/* --- HARDENED CONTAINER: fixes runaway growth --- */
 .chart-wrap{
   background:var(--panel); border:1px solid #1b2331; border-radius:.75rem;
   padding:.5rem .75rem 1rem;
-  height:520px;           /* explicit height to avoid resize animation */
+  height:520px;
+  min-height:520px;
+  max-height:520px;
   position:relative;
+  overflow:hidden;
+  contain: layout size paint; /* break resize feedback loops */
 }
-canvas{
+#forecastChart{
   display:block;
-  width:100% !important;
-  height:100% !important; /* canvas fills parent */
+  width:100%;
+  height:100%;
 }
 .hover-readout{
   margin-top:.35rem; color:var(--muted); font-family:ui-monospace,Consolas,Menlo,monospace;

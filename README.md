@@ -1,9 +1,6 @@
-# NWS Forecast Viewer — v2
+# NWS Forecast Viewer — v3
 
-Fixes & changes:
-- Prevents initial vertical stretch by giving the canvas parent a fixed height (520px) and disabling Chart.js animations.
-- Hover now always works: a manual nearest-x mouse/touch tracker updates the readout even when the library doesn’t select an element.
-- Visuals are closer to WUnderground: tuned colors, subtle grid, smoothed temp/dew lines, filled PoP & cloud.
+**Runaway height fix**: The chart container uses `min-height`, `max-height`, `overflow:hidden`, and `contain: layout size paint` to break any ResizeObserver feedback loops. The hover readout is moved outside the chart container. Height is fixed at 520px (responsive width).
 
 Files:
 - index.html
