@@ -90,21 +90,61 @@ function forecastToEmoji(shortForecast) {
   return '🌡️';
 }
 
-function renderDayStrip(daily, qpfByDay) {
+// Build a per-day map of sunrise/sunset by scanning hourly isDaytime transitions
+function computeSunriseSunset(hourly) {
+  const periods = hourly.properties?.periods || [];
+  const map = new Map(); // key: date.toDateString() -> { sunrise, sunset }
+
+  for (let i = 1; i < periods.length; i++) {
+    const prev = periods[i - 1];
+    const cur = periods[i];
+
+    // Night -> Day = sunrise at current start
+    if (prev.isDaytime === false && cur.isDaytime === true) {
+      const d = new Date(cur.startTime);
+      const key = d.toDateString();
+      const sr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const rec = map.get(key) || {};
+      if (!rec.sunrise) rec.sunrise = sr;
+      map.set(key, rec);
+    }
+
+    // Day -> Night = sunset at current start
+    if (prev.isDaytime === true && cur.isDaytime === false) {
+      const d = new Date(cur.startTime);
+      const key = d.toDateString();
+      const ss = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const rec = map.get(key) || {};
+      if (!rec.sunset) rec.sunset = ss;
+      map.set(key, rec);
+    }
+  }
+  return map;
+}
+
+function renderDayStrip(daily, qpfByDay, sunTimes) {
   const daysEl = els.dayStrip;
   daysEl.innerHTML = '';
   const periods = (daily.properties?.periods || []).filter(p => p.isDaytime);
+
   periods.forEach(p => {
     const date = new Date(p.startTime);
     const name = date.toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' });
     const emoji = forecastToEmoji(p.shortForecast);
     const qpf = qpfByDay.get(date.toDateString()) || 0;
+
+    // sunrise/sunset for this calendar day (if we have them)
+    const sun = sunTimes?.get(date.toDateString()) || {};
+    const sr = sun.sunrise || '—';
+    const ss = sun.sunset || '—';
+
     const card = document.createElement('div');
     card.className = 'day';
     card.innerHTML = `
       <div class="name">${name}</div>
       <div class="emoji" aria-hidden="true">${emoji}</div>
       <div class="temps"><span class="hi">${p.temperature}°F</span><span class="lo">${findNightLowFor(p, daily)}°F</span></div>
+      <div class="sun">🌅 ${sr} · 🌇 ${ss}</div>
       <div class="precip">${qpf.toFixed(2)} in</div>
     `;
     daysEl.appendChild(card);
@@ -514,7 +554,7 @@ async function showForecast(lat, lon, labelOverride){
   const series = buildSeries(grid, hourly);
   lastSeries = series;
 
-  renderDayStrip(daily, series.qpfByDay);
+  renderDayStrip(daily, series.qpfByDay, computeSunriseSunset(hourly));
   buildAllCharts(series);
 
   if (series.tAxis.length){
