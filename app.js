@@ -91,33 +91,42 @@ function forecastToEmoji(shortForecast) {
 }
 
 // Build a per-day map of sunrise/sunset by scanning hourly isDaytime transitions
-function computeSunriseSunset(hourly) {
-  const periods = hourly.properties?.periods || [];
-  const map = new Map(); // key: date.toDateString() -> { sunrise, sunset }
+// Accurate sunrise/sunset from solar elevation zero-crossings (NOAA-style)
+function computeSunriseSunset(series, lat, lon, timeZone) {
+  const map = new Map(); // key: local date string -> { sunrise, sunset }
+  if (!series?.tAxis?.length) return map;
 
-  for (let i = 1; i < periods.length; i++) {
-    const prev = periods[i - 1];
-    const cur = periods[i];
+  const sign = v => (v === 0 ? 0 : v > 0 ? 1 : -1);
+  const fmt  = ts => new Date(ts).toLocaleTimeString([], { timeZone, hour: 'numeric', minute: '2-digit' });
 
-    // Night -> Day = sunrise at current start
-    if (prev.isDaytime === false && cur.isDaytime === true) {
-      const d = new Date(cur.startTime);
-      const key = d.toDateString();
-      const sr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      const rec = map.get(key) || {};
-      if (!rec.sunrise) rec.sunrise = sr;
-      map.set(key, rec);
+  // Binary-search refine of the crossing time in [t0,t1]
+  const refine = (t0, t1) => {
+    for (let i = 0; i < 10; i++) {
+      const tm = (t0 + t1) / 2;
+      const e0 = solarElevation(new Date(t0), lat, lon);
+      const em = solarElevation(new Date(tm), lat, lon);
+      // keep the half interval that contains the sign change
+      if ((e0 <= 0 && em >= 0) || (e0 >= 0 && em <= 0)) t1 = tm; else t0 = tm;
     }
+    return (t0 + t1) / 2;
+  };
 
-    // Day -> Night = sunset at current start
-    if (prev.isDaytime === true && cur.isDaytime === false) {
-      const d = new Date(cur.startTime);
-      const key = d.toDateString();
-      const ss = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      const rec = map.get(key) || {};
-      if (!rec.sunset) rec.sunset = ss;
-      map.set(key, rec);
-    }
+  for (let i = 1; i < series.tAxis.length; i++) {
+    const t0 = series.tAxis[i - 1];
+    const t1 = series.tAxis[i];
+
+    const e0 = solarElevation(new Date(t0), lat, lon);
+    const e1 = solarElevation(new Date(t1), lat, lon);
+    if (sign(e0) === sign(e1)) continue;       // no crossing in this interval
+
+    const tc = refine(t0, t1);                  // exact crossing timestamp
+    const dayKey = new Date(tc).toLocaleDateString([], { timeZone });
+    const rec = map.get(dayKey) || {};
+
+    if (e0 < 0 && e1 > 0 && !rec.sunrise) rec.sunrise = fmt(tc); // night->day
+    if (e0 > 0 && e1 < 0 && !rec.sunset)  rec.sunset  = fmt(tc); // day->night
+
+    map.set(dayKey, rec);
   }
   return map;
 }
@@ -606,7 +615,7 @@ async function showForecast(lat, lon, labelOverride){
   els.place.textContent = 'Loading…';
   els.updated.textContent = '';
 
-  const { place, daily, grid, hourly } = await loadByLatLon(lat, lon);
+  const { place, daily, grid, hourly, timeZone } = await loadByLatLon(lat, lon);
   const label = labelOverride || place || `${lat.toFixed(3)}, ${lon.toFixed(3)}`;
   els.place.textContent = label;
   const upd = grid.properties.updateTime || daily.properties.updated || new Date().toISOString();
@@ -615,8 +624,8 @@ async function showForecast(lat, lon, labelOverride){
   const series = buildSeries(grid, hourly);
   lastSeries = series;
 
-  const tz = timeZone || 'UTC';
-  const sunTimes = computeSunriseSunsetPrecise(series, grid.geometry.coordinates[1], grid.geometry.coordinates[0], tz);
+  const tz = timeZone || 'UTC'; // timeZone should come from loadByLatLon()
+  const sunTimes = computeSunriseSunset(series, grid.geometry.coordinates[1], grid.geometry.coordinates[0], tz);
   renderDayStrip(daily, series.qpfByDay, sunTimes);
   buildAllCharts(series);
 
