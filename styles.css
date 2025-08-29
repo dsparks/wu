@@ -68,6 +68,14 @@ main{padding:1rem; max-width:1100px; margin:0 auto}
 .day .temps .lo{color:var(--muted)}
 .day .precip{font-size:.8rem; color:var(--muted)}
 
+.day .sun{
+  font-size: 0.78rem;       /* smaller line */
+  line-height: 1.15;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.day .sun .sunline{ white-space: nowrap; }
+
 .facet-wrap{display:flex; flex-direction:column; gap:.6rem}
 .facet{border:1px solid #e5e7eb; border-radius:.75rem; background:#fff; padding:.5rem .75rem}
 .facet-title{font-size:.9rem; color:var(--muted); margin-bottom:.25rem}
