@@ -234,7 +234,6 @@ const series = {
   snowfall: snowfall ? [] : null,
 };
   tAxis.forEach(ms => {
-    const d=new Date(ms); series.sunAlt.push(solarElevation(d, grid.geometry.coordinates[1], grid.geometry.coordinates[0]));
     series.temperature.push(at(temp, ms));
     series.dewpoint.push(at(dew, ms));
     series.humidity.push(at(rh, ms));
