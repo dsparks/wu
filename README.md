@@ -1,13 +1,10 @@
-# NWS Forecast — v4 (WUnderground-style facets)
+# NWS Forecast — v4.1
 
-Features:
-- Vertically **faceted** charts (temperature/dew, humidity/cloud, precip, wind, pressure).
-- Light **nighttime shading** using `forecastHourly.isDaytime` to generate bands.
-- **Vertical crosshair** synced across all facets + a consolidated hover readout (no emoji in tooltips).
-- Daily strip at the top using **emoji** (🌞, 🌥️, 🌧️, ⛈️, ❄️, 🌫️, …) mapped from `shortForecast`.
-- Fully static; GitHub Pages ready; no API keys.
+Changes requested:
+1. **Midnight dividers** across all facets (darker vertical lines).
+2. **Humidity + Cloud Cover + Chance of Precip** combined into one chart.
+3. **Precipitation (in)** on its own compressed chart. Removed accumulation line.
+4. **Wind speed** on its own chart (unchanged).
+5. **Pressure** facet now appears only if data is available from the grid endpoint (inHg).
 
-File list:
-- `index.html` — markup
-- `styles.css` — WUnderground-like light theme
-- `app.js` — data fetching, series prep, charts, shading, crosshair
+Everything is still static and GitHub Pages–ready.
