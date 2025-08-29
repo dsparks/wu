@@ -1,10 +1,12 @@
-# NWS Forecast — v4.1
+# NWS Forecast — v4.2
 
-Changes requested:
-1. **Midnight dividers** across all facets (darker vertical lines).
-2. **Humidity + Cloud Cover + Chance of Precip** combined into one chart.
-3. **Precipitation (in)** on its own compressed chart. Removed accumulation line.
-4. **Wind speed** on its own chart (unchanged).
-5. **Pressure** facet now appears only if data is available from the grid endpoint (inHg).
+Adds:
+- **Date labels** centered between midnight dividers (top facet).
+- Crosshair + hover from **any facet** (not only the top plot).
+- **Hour-only** tooltip titles (e.g., “8 AM”).
+- **Concise precipitation descriptors** in precip tooltip:
+  - Rain (liquid): misty · drizzle · light rain · moderate · downpour
+  - Snow: flurries · light snow · mod. snow · heavy snow
+  - Detects snow via `snowfallAmount` or (fallback) cold temps.
 
-Everything is still static and GitHub Pages–ready.
+Still static and GitHub Pages–ready.

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Forecast (NWS) — WUnderground Facets</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Client-side NWS forecast viewer with WUnderground-style facets, night shading, and crosshair." />
+  <meta name="description" content="Client-side NWS forecast viewer with WUnderground-style facets, night shading, crosshair, and date labels." />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -33,7 +33,7 @@
         <canvas id="chart-temp" width="900" height="150" aria-label="Temperature and dew point"></canvas>
       </div>
 
-      <div class="facet" data-facet="humidCloudPop">
+      <div class="facet" data-facet="hcp">
         <div class="facet-title">Humidity / Cloud Cover / Chance of Precip (%)</div>
         <canvas id="chart-hcp" width="900" height="120" aria-label="Humidity, Cloud Cover, PoP"></canvas>
       </div>

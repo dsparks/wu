@@ -1,9 +1,5 @@
-/* v4.1 — requested tweaks:
- * - Midnight vertical dividers across all facets
- * - Combine humidity, cloud, and PoP on one chart
- * - Precipitation alone (compressed height), drop accumulation
- * - Wind facet same
- * - Pressure facet only if data exists
+/* v4.2 — date labels, crosshair on all facets, hour-only tooltips,
+ * and concise precip descriptors (rain/snow).
  */
 const els = {
   place: document.getElementById('placeName'),
@@ -36,7 +32,7 @@ const fmtF = v => (v == null ? '—' : `${Math.round(v)}°F`);
 const fmtIn = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} in`);
 const fmtMph = v => (v == null ? '—' : `${Math.round(v)} mph`);
 const fmtInHg = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} inHg`);
-const fmtTime = ms => new Date(ms).toLocaleString([], {weekday:'short', month:'short', day:'numeric', hour:'numeric'});
+const fmtHour = ms => new Date(ms).toLocaleString([], {hour:'numeric'});
 
 function parseValidTime(validTime) {
   const [startIso, durationIso] = validTime.split('/');
@@ -124,6 +120,24 @@ function renderDayStrip(daily, qpfByDay) {
   }
 }
 
+// Precip descriptor (rain/snow) — concise, 1–3 words
+function precipDescriptor(qpfIn, isSnow, snowIn){
+  if (!qpfIn || qpfIn <= 0) return '';
+  if (isSnow){
+    const rate = snowIn != null ? snowIn : qpfIn * 10; // 10:1 fallback
+    if (rate < 0.1) return 'flurries';
+    if (rate < 0.3) return 'light snow';
+    if (rate < 0.6) return 'mod. snow';
+    return 'heavy snow';
+  } else {
+    if (qpfIn < 0.02) return 'misty';
+    if (qpfIn < 0.04) return 'drizzle';
+    if (qpfIn < 0.06) return 'light rain';
+    if (qpfIn < 0.10) return 'moderate';
+    return 'downpour';
+  }
+}
+
 function buildSeries(grid, hourly) {
   const g = grid.properties;
   const temp = expandHourly(g.temperature.values, c2f);
@@ -132,6 +146,7 @@ function buildSeries(grid, hourly) {
   const cloud = expandHourly(g.skyCover.values, v => v);
   const pop = expandHourly(g.probabilityOfPrecipitation.values, v => v);
   const qpf = expandHourly(g.quantitativePrecipitation.values, mm2in);
+  const snowfall = g.snowfallAmount?.values ? expandHourly(g.snowfallAmount.values, mm2in) : null;
   const wspd = expandHourly(g.windSpeed.values, kmh2mph);
   const press = g.pressure?.values ? expandHourly(g.pressure.values, pa2inhg) : null;
 
@@ -158,6 +173,12 @@ function buildSeries(grid, hourly) {
     if (d.getHours() === 0) dayDivs.push(ms);
   });
 
+  // Centers between midnights for date labels
+  const dateCenters = [];
+  for (let i=0; i<dayDivs.length-1; i++){
+    dateCenters.push( (dayDivs[i] + dayDivs[i+1]) / 2 );
+  }
+
   // Per-day QPF for strip
   const qpfByDay = new Map();
   qpf.forEach((val, t) => {
@@ -165,29 +186,29 @@ function buildSeries(grid, hourly) {
     qpfByDay.set(d, (qpfByDay.get(d) || 0) + (val || 0));
   });
 
-  let accum = 0;
   const series = {
-    tAxis, nightBands, dayDivs, qpfByDay,
+    tAxis, nightBands, dayDivs, dateCenters, qpfByDay,
     temperature: [], dewpoint: [], humidity: [], cloud: [], pop: [],
     qpfHourly: [], wind: [], pressure: press ? [] : null,
+    snowfall: snowfall ? [] : null,
   };
+
   tAxis.forEach(ms => {
-    const q = at(qpf, ms);
-    accum += q || 0;
     series.temperature.push(at(temp, ms));
     series.dewpoint.push(at(dew, ms));
     series.humidity.push(at(rh, ms));
     series.cloud.push(at(cloud, ms));
     series.pop.push(at(pop, ms));
-    series.qpfHourly.push(q);
+    series.qpfHourly.push(at(qpf, ms));
     series.wind.push(at(wspd, ms));
     if (press) series.pressure.push(at(press, ms));
+    if (snowfall) series.snowfall.push(at(snowfall, ms));
   });
 
   return series;
 }
 
-// Chart factory with plugins: night shading, crosshair, midnight dividers
+// Chart factory with plugins: night shading, crosshair, midnight lines, date labels (on top facet)
 function makeFacetChart(canvas, cfg){
   const ctx = canvas.getContext('2d');
   const ch = new Chart(ctx, {
@@ -199,32 +220,37 @@ function makeFacetChart(canvas, cfg){
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
-        tooltip: { enabled: true, callbacks: cfg.tooltipCallbacks || {} },
+        tooltip: {
+          enabled: true,
+          callbacks: {
+            title(items){ const i = items[0].dataIndex; return fmtHour(cfg.labels[i]); },
+            label: (cfg.tooltipLabel || ((c)=>` ${c.dataset.label}: ${c.raw}`))
+          }
+        },
         nightShade: { bands: cfg.nightBands || [], color: 'rgba(125,125,125,0.08)' },
         crosshair: { color: 'rgba(0,0,0,0.35)', width: 1 },
-        dayDividers: { times: cfg.dayDivs || [], color: getCSS('--gridMid') }
+        dayDividers: { times: cfg.dayDivs || [], color: getCSS('--gridMid') },
+        dateLabels: { centers: cfg.dateCenters || [], enabled: !!cfg.showDateLabels }
       },
       scales: cfg.scales
     },
     plugins: [{
       id: 'backgroundPlugins',
       beforeDatasetsDraw(chart){
-        // night bands
         const bands = chart.options.plugins.nightShade?.bands || [];
         const ncolor = chart.options.plugins.nightShade?.color || 'rgba(0,0,0,0.05)';
         const x = chart.scales.x;
-        const y = chart.chartArea;
+        const area = chart.chartArea;
         const ctx = chart.ctx;
         ctx.save();
         ctx.fillStyle = ncolor;
         bands.forEach(([ts0, ts1]) => {
           const x0 = x.getPixelForValue(ts0);
           const x1 = x.getPixelForValue(ts1);
-          ctx.fillRect(Math.min(x0,x1), y.top, Math.abs(x1-x0), y.bottom - y.top);
+          ctx.fillRect(Math.min(x0,x1), area.top, Math.abs(x1-x0), area.bottom - area.top);
         });
         ctx.restore();
 
-        // midnight dividers
         const times = chart.options.plugins.dayDividers?.times || [];
         const dcolor = chart.options.plugins.dayDividers?.color || '#c7ceda';
         ctx.save();
@@ -233,24 +259,41 @@ function makeFacetChart(canvas, cfg){
         times.forEach(ts => {
           const xp = x.getPixelForValue(ts);
           ctx.beginPath();
-          ctx.moveTo(xp, y.top);
-          ctx.lineTo(xp, y.bottom);
+          ctx.moveTo(xp, area.top);
+          ctx.lineTo(xp, area.bottom);
           ctx.stroke();
         });
         ctx.restore();
+
+        // date labels (only if enabled, typically on top facet)
+        const centers = chart.options.plugins.dateLabels?.centers || [];
+        if (chart.options.plugins.dateLabels?.enabled){
+          ctx.save();
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          centers.forEach(ms => {
+            const xmid = x.getPixelForValue(ms);
+            const d = new Date(ms);
+            const label = d.toLocaleDateString([], { weekday:'short', month:'numeric', day:'numeric' });
+            ctx.fillText(label, xmid, area.top + 2);
+          });
+          ctx.restore();
+        }
       },
       afterDatasetsDraw(chart){
         if (CROSSHAIR_TS == null) return;
         const x = chart.scales.x;
-        const y = chart.chartArea;
+        const area = chart.chartArea;
         const ctx = chart.ctx;
         const xpix = x.getPixelForValue(CROSSHAIR_TS);
         ctx.save();
         ctx.strokeStyle = chart.options.plugins.crosshair?.color || 'rgba(0,0,0,0.35)';
         ctx.lineWidth = chart.options.plugins.crosshair?.width || 1;
         ctx.beginPath();
-        ctx.moveTo(xpix, y.top);
-        ctx.lineTo(xpix, y.bottom);
+        ctx.moveTo(xpix, area.top);
+        ctx.lineTo(xpix, area.bottom);
         ctx.stroke();
         ctx.restore();
       }
@@ -275,7 +318,7 @@ function updateReadout(series, ts){
   const idx = (Math.abs(tArr[lo] - ts) < Math.abs(tArr[hi] - ts)) ? lo : hi;
 
   const parts = [
-    `${fmtTime(tArr[idx])}`,
+    `${new Date(tArr[idx]).toLocaleString([], {weekday:'short', month:'numeric', day:'numeric', hour:'numeric'})}`,
     `Temp ${fmtF(series.temperature[idx])}`,
     `Dew ${fmtF(series.dewpoint[idx])}`,
     `RH ${fmtPct(series.humidity[idx])}`,
@@ -297,7 +340,7 @@ async function geocodeQuery(q) {
     return {
       lat: parseFloat(place.latitude),
       lon: parseFloat(place.longitude),
-      label: `${j['post code']} ${place['place name']}, ${place['state abbreviation']}`
+      label: `${j['post code']} ${place['place name']}, ${j['state abbreviation'] || place['state abbreviation'] || ''}`
     };
   } else {
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}&addressdetails=1&email=noreply@example.com`;
@@ -328,13 +371,12 @@ async function loadByLatLon(lat, lon) {
 
 function buildAllCharts(series){
   Object.values(els.canvases).forEach(c => c && sizeCanvasToParent(c));
-
   const labels = series.tAxis;
 
+  const baseTitle = items => fmtHour(labels[items[0].dataIndex]);
+
   charts.temp = makeFacetChart(els.canvases.temp, {
-    labels,
-    nightBands: series.nightBands,
-    dayDivs: series.dayDivs,
+    labels, nightBands: series.nightBands, dayDivs: series.dayDivs, dateCenters: series.dateCenters, showDateLabels: true,
     datasets: [
       { label:'Temperature (°F)', data: series.temperature, borderColor:getCSS('--temp'), backgroundColor:'transparent', yAxisID:'y', tension:0.3, pointRadius:0, spanGaps:true },
       { label:'Dew Point (°F)', data: series.dewpoint, borderColor:getCSS('--dew'), backgroundColor:'transparent', yAxisID:'y', tension:0.3, pointRadius:0, spanGaps:true },
@@ -346,9 +388,7 @@ function buildAllCharts(series){
   });
 
   charts.hcp = makeFacetChart(els.canvases.hcp, {
-    labels,
-    nightBands: series.nightBands,
-    dayDivs: series.dayDivs,
+    labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
       { label:'Humidity (%)', data: series.humidity, borderColor:getCSS('--humid'), backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
       { label:'Cloud Cover (%)', data: series.cloud, borderColor:'transparent', backgroundColor:hexWithAlpha(getCSS('--cloud'),0.35), yAxisID:'y', type:'line', fill:true, pointRadius:0, spanGaps:true },
@@ -361,9 +401,7 @@ function buildAllCharts(series){
   });
 
   charts.precip = makeFacetChart(els.canvases.precip, {
-    labels,
-    nightBands: series.nightBands,
-    dayDivs: series.dayDivs,
+    labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
       { label:'Hourly Liquid (in)', data: series.qpfHourly, type:'bar', yAxisID:'y', backgroundColor:getCSS('--qpf'), borderWidth:0 },
     ],
@@ -372,11 +410,19 @@ function buildAllCharts(series){
       y: { position:'left', ticks:{ color:getCSS('--qpf') }, grid:{ color:getCSS('--grid') } }
     }
   });
+  // Custom tooltip label with descriptor
+  charts.precip.options.plugins.tooltip.callbacks.label = (ctx) => {
+    const i = ctx.dataIndex;
+    const q = series.qpfHourly[i];
+    const isSnow = (series.snowfall && ((series.snowfall[i]||0) > 0)) || (series.temperature[i] != null && series.temperature[i] <= 34);
+    const snowIn = series.snowfall ? series.snowfall[i] : null;
+    const desc = precipDescriptor(q || 0, !!isSnow, snowIn);
+    const amount = (q == null ? '—' : `${(Math.round(q*100)/100).toFixed(2)} in`);
+    return desc ? ` ${amount} · ${desc}` : ` ${amount}`;
+  };
 
   charts.wind = makeFacetChart(els.canvases.wind, {
-    labels,
-    nightBands: series.nightBands,
-    dayDivs: series.dayDivs,
+    labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
       { label:'Wind (mph)', data: series.wind, borderColor:getCSS('--wind'), backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:2, spanGaps:true },
     ],
@@ -389,9 +435,7 @@ function buildAllCharts(series){
   if (series.pressure){
     els.pressFacet.style.display = '';
     charts.press = makeFacetChart(els.canvases.press, {
-      labels,
-      nightBands: series.nightBands,
-      dayDivs: series.dayDivs,
+      labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
       datasets: [
         { label:'Pressure (inHg)', data: series.pressure, borderColor:getCSS('--press'), backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
       ],
@@ -404,20 +448,25 @@ function buildAllCharts(series){
     els.pressFacet.style.display = 'none';
   }
 
-  const topCanvas = els.canvases.temp;
-  const handler = (evt) => {
-    const rect = topCanvas.getBoundingClientRect();
+  // Crosshair + hover: attach to **all** canvases
+  const moveFromCanvas = (canvasKey) => (evt) => {
+    const ch = charts[canvasKey];
+    const rect = ch.canvas.getBoundingClientRect();
     const x = (evt.touches && evt.touches[0]) ? (evt.touches[0].clientX - rect.left) : (evt.clientX - rect.left);
-    const xScale = charts.temp.scales.x;
+    const xScale = ch.scales.x;
     const ts = xScale.getValueForPixel(x);
     if (!ts) return;
     CROSSHAIR_TS = ts;
-    Object.values(charts).forEach(ch => ch.update('none'));
+    Object.values(charts).forEach(c => c.update('none'));
     updateReadout(lastSeries, ts);
   };
-  topCanvas.addEventListener('mousemove', handler);
-  topCanvas.addEventListener('touchmove', handler, { passive:true });
+  for (const key of Object.keys(charts)){
+    const cv = charts[key].canvas;
+    cv.addEventListener('mousemove', moveFromCanvas(key));
+    cv.addEventListener('touchmove', moveFromCanvas(key), { passive:true });
+  }
 
+  // Handle window resize
   window.addEventListener('resize', () => {
     for (const [k,canvas] of Object.entries(els.canvases)){
       if (!canvas) continue;
