@@ -1,8 +1,8 @@
-/* v4.2.1 (v4.2 + fixes)
- * - Fix: destroy/rebuild charts & listeners on search (no stale graphs)
- * - Fix: tooltip offset away from cursor (no line occlusion)
- * - Keeps: date labels, midnight dividers, night shading, hour-only tooltip titles,
- *          emoji day strip, precip descriptors, crosshair sync
+/* v4.2.3 — stable build from v4.2 plus:
+ * - Fix: destroy/rebuild charts & listeners on search (stale graph bug)
+ * - Crosshair shared across facets
+ * - Floating value tags at the crosshair (WU style); default tooltip disabled
+ * - Hour-only titles in the shared readout; date labels on top facet
  */
 const els = {
   place: document.getElementById('placeName'),
@@ -37,17 +37,8 @@ const fmtF = v => (v == null ? '—' : `${Math.round(v)}°F`);
 const fmtIn = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} in`);
 const fmtMph = v => (v == null ? '—' : `${Math.round(v)} mph`);
 const fmtInHg = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} inHg`);
-const fmtHour = ms => new Date(ms).toLocaleString([], {hour:'numeric'});
 
-// Custom tooltip positioner to offset away from cursor
-Chart.Tooltip.positioners.away = function(elements, pos){
-  const canvas = elements?.length ? elements[0].element?.chart?.canvas : null;
-  const rect = canvas ? canvas.getBoundingClientRect() : {width:0};
-  const leftHalf = pos.x < rect.width/2;
-  const x = pos.x + (leftHalf ? 18 : -18);
-  const y = pos.y - 18;
-  return {x, y};
-};
+const fmtHour = ms => new Date(ms).toLocaleString([], {hour:'numeric'});
 
 function parseValidTime(validTime) {
   const [startIso, durationIso] = validTime.split('/');
@@ -89,7 +80,7 @@ async function fetchJSON(url) {
   return res.json();
 }
 
-// Emoji mapping
+// Emoji mapping for day strip
 function forecastToEmoji(shortForecast) {
   const s = (shortForecast || '').toLowerCase();
   if (s.includes('thunder')) return '⛈️';
@@ -135,7 +126,7 @@ function renderDayStrip(daily, qpfByDay) {
   }
 }
 
-// Precip descriptor (rain/snow) concise
+// concise descriptor for precip (rain/snow)
 function precipDescriptor(qpfIn, isSnow, snowIn){
   if (!qpfIn || qpfIn <= 0) return '';
   if (isSnow){
@@ -167,7 +158,7 @@ function buildSeries(grid, hourly) {
 
   const tAxis = mergeTimeAxis(temp, dew, rh, cloud, pop, qpf, wspd, press || new Map());
 
-  // Night bands from hourly isDaytime
+  // night shading from hourly flags
   const h = hourly.properties?.periods || [];
   const nightBands = [];
   for (let i=0; i<h.length; i++){
@@ -181,33 +172,20 @@ function buildSeries(grid, hourly) {
     }
   }
 
-  // Day divider timestamps (midnight local)
+  // midnight lines + date centers
   const dayDivs = [];
-  tAxis.forEach(ms => {
-    const d = new Date(ms);
-    if (d.getHours() === 0) dayDivs.push(ms);
-  });
-
-  // Centers between midnights for date labels
+  tAxis.forEach(ms => { const d = new Date(ms); if (d.getHours() === 0) dayDivs.push(ms); });
   const dateCenters = [];
-  for (let i=0; i<dayDivs.length-1; i++){
-    dateCenters.push( (dayDivs[i] + dayDivs[i+1]) / 2 );
-  }
+  for (let i=0; i<dayDivs.length-1; i++){ dateCenters.push((dayDivs[i]+dayDivs[i+1])/2); }
 
-  // Per-day QPF for strip
   const qpfByDay = new Map();
-  qpf.forEach((val, t) => {
-    const d = new Date(t).toDateString();
-    qpfByDay.set(d, (qpfByDay.get(d) || 0) + (val || 0));
-  });
+  qpf.forEach((val, t) => { const d = new Date(t).toDateString(); qpfByDay.set(d, (qpfByDay.get(d)||0) + (val||0)); });
 
   const series = {
     tAxis, nightBands, dayDivs, dateCenters, qpfByDay,
     temperature: [], dewpoint: [], humidity: [], cloud: [], pop: [],
-    qpfHourly: [], wind: [], pressure: press ? [] : null,
-    snowfall: snowfall ? [] : null,
+    qpfHourly: [], wind: [], pressure: press ? [] : null, snowfall: snowfall ? [] : null,
   };
-
   tAxis.forEach(ms => {
     series.temperature.push(at(temp, ms));
     series.dewpoint.push(at(dew, ms));
@@ -219,13 +197,12 @@ function buildSeries(grid, hourly) {
     if (press) series.pressure.push(at(press, ms));
     if (snowfall) series.snowfall.push(at(snowfall, ms));
   });
-
   return series;
 }
 
 function makeFacetChart(canvas, cfg){
   const ctx = canvas.getContext('2d');
-  const ch = new Chart(ctx, {
+  return new Chart(ctx, {
     type: 'line',
     data: { labels: cfg.labels, datasets: cfg.datasets },
     options: {
@@ -234,13 +211,7 @@ function makeFacetChart(canvas, cfg){
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
-        tooltip: {
-          enabled: false,
-          callbacks: {
-            title(items){ const i = items[0].dataIndex; return fmtHour(cfg.labels[i]); },
-            label: (cfg.tooltipLabel || ((c)=>` ${c.dataset.label}: ${c.raw}`))
-          }
-        },
+        tooltip: { enabled: false }, // we render our own tags
         nightShade: { bands: cfg.nightBands || [], color: 'rgba(125,125,125,0.08)' },
         crosshair: { color: 'rgba(0,0,0,0.35)', width: 1 },
         dayDividers: { times: cfg.dayDivs || [], color: getCSS('--gridMid') },
@@ -279,8 +250,8 @@ function makeFacetChart(canvas, cfg){
         });
         ctx.restore();
 
+        const centers = chart.options.plugins.dateLabels?.centers || [];
         if (chart.options.plugins.dateLabels?.enabled){
-          const centers = chart.options.plugins.dateLabels?.centers || [];
           ctx.save();
           ctx.fillStyle = '#6b7280';
           ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial';
@@ -302,7 +273,7 @@ function makeFacetChart(canvas, cfg){
         const ctx = chart.ctx;
         const xpix = x.getPixelForValue(CROSSHAIR_TS);
 
-        // Draw crosshair
+        // vertical crosshair
         ctx.save();
         ctx.strokeStyle = chart.options.plugins.crosshair?.color || 'rgba(0,0,0,0.35)';
         ctx.lineWidth = chart.options.plugins.crosshair?.width || 1;
@@ -312,88 +283,66 @@ function makeFacetChart(canvas, cfg){
         ctx.stroke();
         ctx.restore();
 
-        // Floating value tags (WU-style) for each visible dataset
-        try{
-          const labels = chart.data.labels;
-          // Find nearest index to CROSSHAIR_TS
-          let idx = 0;
-          if (labels?.length){
-            let lo=0, hi=labels.length-1, mid;
-            while (hi-lo>1){ mid=(hi+lo)>>1; if (labels[mid] < CROSSHAIR_TS) lo=mid; else hi=mid; }
-            idx = (Math.abs(labels[lo]-CROSSHAIR_TS) < Math.abs(labels[hi]-CROSSHAIR_TS)) ? lo : hi;
-          }
-          const padX = 6, padY = 3, radius = 6, xOffset = 8;
-          const drawTag = (y, text, color) => {
-            if (y==null || isNaN(y)) return;
-            const tx = xpix + xOffset;
-            const ty = y - 10;
-            ctx.save();
-            ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial';
-            const metrics = ctx.measureText(text);
-            const w = metrics.width + padX*2;
-            const h = 18;
-            // translucent background
-            ctx.fillStyle = 'rgba(255,255,255,0.70)';
-            ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-            ctx.lineWidth = 1;
-            // rounded rect
-            const rx = tx, ry = ty;
-            ctx.beginPath();
-            ctx.moveTo(rx+radius, ry);
-            ctx.arcTo(rx+w, ry, rx+w, ry+h, radius);
-            ctx.arcTo(rx+w, ry+h, rx, ry+h, radius);
-            ctx.arcTo(rx, ry+h, rx, ry, radius);
-            ctx.arcTo(rx, ry, rx+w, ry, radius);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
+        // floating value tags near crosshair (WU-style)
+        const labels = chart.data.labels || [];
+        let idx = 0;
+        if (labels.length){
+          let lo=0, hi=labels.length-1, mid;
+          while (hi-lo>1){ mid=(hi+lo)>>1; if (labels[mid] < CROSSHAIR_TS) lo=mid; else hi=mid; }
+          idx = (Math.abs(labels[lo]-CROSSHAIR_TS) < Math.abs(labels[hi]-CROSSHAIR_TS)) ? lo : hi;
+        }
+        const padX = 6, radius = 6, xOffset = 8;
+        const drawTag = (y, text, color) => {
+          if (y==null || isNaN(y)) return;
+          const tx = xpix + xOffset;
+          const ty = y - 10;
+          ctx.save();
+          ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial';
+          const metrics = ctx.measureText(text);
+          const w = metrics.width + padX*2;
+          const h = 18;
+          ctx.fillStyle = 'rgba(255,255,255,0.70)';
+          ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(tx+radius, ty);
+          ctx.arcTo(tx+w, ty, tx+w, ty+h, radius);
+          ctx.arcTo(tx+w, ty+h, tx, ty+h, radius);
+          ctx.arcTo(tx, ty+h, tx, ty, radius);
+          ctx.arcTo(tx, ty, tx+w, ty, radius);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
 
-            ctx.fillStyle = color || '#111827';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(text, tx + padX, ry + h/2);
-            ctx.restore();
-          };
+          ctx.fillStyle = color || '#111827';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, tx + padX, ty + h/2);
+          ctx.restore();
+        };
 
-          const ds = chart.data.datasets;
-          // Compute y pixel per dataset raw value at idx
-          for (let k=0; k<ds.length; k++){
-            const d = ds[k]; if (d.hidden) continue;
-            const yScale = chart.scales[d.yAxisID || 'y'];
-            const raw = d.data[idx];
-            if (raw == null) continue;
-            const ypix = yScale.getPixelForValue(raw);
-            // Format brief text depending on chart context
-            let valText = '';
-            const label = (d.label||'').toLowerCase();
-            if (label.includes('temperature')) valText = `${Math.round(raw)}°F`;
-            else if (label.includes('dew')) valText = `${Math.round(raw)}°F`;
-            else if (label.includes('humidity')) valText = `${Math.round(raw)}%`;
-            else if (label.includes('cloud')) valText = `${Math.round(raw)}%`;
-            else if (label.includes('chance')) valText = `${Math.round(raw)}%`;
-            else if (label.includes('wind')) valText = `${Math.round(raw)} mph`;
-            else if (label.includes('pressure')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
-            else if (label.includes('liquid')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
-            else valText = `${raw}`;
-
-            drawTag(ypix, valText, (d.borderColor || '#111827'));
-          }
-        }catch(e){/* ignore */}
-        const x = chart.scales.x;
-        const area = chart.chartArea;
-        const ctx = chart.ctx;
-        const xpix = x.getPixelForValue(CROSSHAIR_TS);
-        ctx.save();
-        ctx.strokeStyle = chart.options.plugins.crosshair?.color || 'rgba(0,0,0,0.35)';
-        ctx.lineWidth = chart.options.plugins.crosshair?.width || 1;
-        ctx.beginPath();
-        ctx.moveTo(xpix, area.top);
-        ctx.lineTo(xpix, area.bottom);
-        ctx.stroke();
-        ctx.restore();
+        const ds = chart.data.datasets || [];
+        for (let k=0; k<ds.length; k++){
+          const d = ds[k]; if (d.hidden) continue;
+          const raw = d.data[idx];
+          if (raw == null) continue;
+          const yScale = chart.scales[d.yAxisID || 'y'];
+          const ypix = yScale.getPixelForValue(raw);
+          let valText = '';
+          const label = (d.label||'').toLowerCase();
+          if (label.includes('temperature')) valText = `${Math.round(raw)}°F`;
+          else if (label.includes('dew')) valText = `${Math.round(raw)}°F`;
+          else if (label.includes('humidity')) valText = `${Math.round(raw)}%`;
+          else if (label.includes('cloud')) valText = `${Math.round(raw)}%`;
+          else if (label.includes('chance')) valText = `${Math.round(raw)}%`;
+          else if (label.includes('wind')) valText = `${Math.round(raw)} mph`;
+          else if (label.includes('pressure')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
+          else if (label.includes('liquid')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
+          else valText = `${raw}`;
+          drawTag(ypix, valText, d.borderColor || '#111827');
+        }
       }
     }]
   });
-  return ch;
 }
 
 function sizeCanvasToParent(canvas){
@@ -464,10 +413,12 @@ async function loadByLatLon(lat, lon) {
 }
 
 function clearOldChartsAndListeners(){
+  // destroy charts
   for (const k of Object.keys(charts)){
     try { charts[k].destroy(); } catch {}
   }
   charts = {};
+  // unbind listeners
   for (const [el, type, fn] of boundHandlers){
     try { el.removeEventListener(type, fn); } catch {}
   }
@@ -517,15 +468,6 @@ function buildAllCharts(series){
       y: { position:'left', ticks:{ color:getCSS('--qpf') }, grid:{ color:getCSS('--grid') } }
     }
   });
-  charts.precip.options.plugins.tooltip.callbacks.label = (ctx) => {
-    const i = ctx.dataIndex;
-    const q = series.qpfHourly[i];
-    const isSnow = (series.snowfall && ((series.snowfall[i]||0) > 0)) || (series.temperature[i] != null && series.temperature[i] <= 34);
-    const snowIn = series.snowfall ? series.snowfall[i] : null;
-    const desc = precipDescriptor(q || 0, !!isSnow, snowIn);
-    const amount = (q == null ? '—' : `${(Math.round(q*100)/100).toFixed(2)} in`);
-    return desc ? ` ${amount} · ${desc}` : ` ${amount}`;
-  };
 
   charts.wind = makeFacetChart(els.canvases.wind, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
@@ -554,7 +496,7 @@ function buildAllCharts(series){
     els.pressFacet.style.display = 'none';
   }
 
-  // Bind hover on all canvases
+  // hover on all charts -> sync crosshair & update readout
   const moveFromChart = (chart) => (evt) => {
     const rect = chart.canvas.getBoundingClientRect();
     const x = (evt.touches && evt.touches[0]) ? (evt.touches[0].clientX - rect.left) : (evt.clientX - rect.left);
@@ -572,7 +514,7 @@ function buildAllCharts(series){
     boundHandlers.push([charts[k].canvas, 'touchmove', fn]);
   }
 
-  // Single resize handler
+  // resize
   resizeHandler = () => {
     for (const [k,canvas] of Object.entries(els.canvases)){
       if (!canvas) continue;
@@ -597,7 +539,6 @@ async function showForecast(lat, lon, labelOverride){
   els.place.textContent = 'Loading…';
   els.updated.textContent = '';
 
-  // Clear old charts/listeners to avoid stale graphs on search
   clearOldChartsAndListeners();
 
   const { place, daily, grid, hourly } = await loadByLatLon(lat, lon);
