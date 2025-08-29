@@ -1,5 +1,8 @@
-/* v4.2 — date labels, crosshair on all facets, hour-only tooltips,
- * and concise precip descriptors (rain/snow).
+/* v4.2.3 — stable build from v4.2 plus:
+ * - Fix: destroy/rebuild charts & listeners on search (stale graph bug)
+ * - Crosshair shared across facets
+ * - Floating value tags at the crosshair (WU style); default tooltip disabled
+ * - Hour-only titles in the shared readout; date labels on top facet
  */
 const els = {
   place: document.getElementById('placeName'),
@@ -22,6 +25,8 @@ const els = {
 let CROSSHAIR_TS = null;
 let charts = {};
 let lastSeries = null;
+let boundHandlers = [];
+let resizeHandler = null;
 
 const c2f = c => (c == null ? null : (c * 9) / 5 + 32);
 const mm2in = mm => (mm == null ? null : mm / 25.4);
@@ -32,6 +37,7 @@ const fmtF = v => (v == null ? '—' : `${Math.round(v)}°F`);
 const fmtIn = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} in`);
 const fmtMph = v => (v == null ? '—' : `${Math.round(v)} mph`);
 const fmtInHg = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} inHg`);
+
 const fmtHour = ms => new Date(ms).toLocaleString([], {hour:'numeric'});
 
 function parseValidTime(validTime) {
@@ -74,7 +80,7 @@ async function fetchJSON(url) {
   return res.json();
 }
 
-// Emoji mapping
+// Emoji mapping for day strip
 function forecastToEmoji(shortForecast) {
   const s = (shortForecast || '').toLowerCase();
   if (s.includes('thunder')) return '⛈️';
@@ -120,11 +126,11 @@ function renderDayStrip(daily, qpfByDay) {
   }
 }
 
-// Precip descriptor (rain/snow) — concise, 1–3 words
+// concise descriptor for precip (rain/snow)
 function precipDescriptor(qpfIn, isSnow, snowIn){
   if (!qpfIn || qpfIn <= 0) return '';
   if (isSnow){
-    const rate = snowIn != null ? snowIn : qpfIn * 10; // 10:1 fallback
+    const rate = snowIn != null ? snowIn : qpfIn * 10;
     if (rate < 0.1) return 'flurries';
     if (rate < 0.3) return 'light snow';
     if (rate < 0.6) return 'mod. snow';
@@ -152,7 +158,7 @@ function buildSeries(grid, hourly) {
 
   const tAxis = mergeTimeAxis(temp, dew, rh, cloud, pop, qpf, wspd, press || new Map());
 
-  // Night bands from hourly isDaytime
+  // night shading from hourly flags
   const h = hourly.properties?.periods || [];
   const nightBands = [];
   for (let i=0; i<h.length; i++){
@@ -166,33 +172,20 @@ function buildSeries(grid, hourly) {
     }
   }
 
-  // Day divider timestamps (midnight local)
+  // midnight lines + date centers
   const dayDivs = [];
-  tAxis.forEach(ms => {
-    const d = new Date(ms);
-    if (d.getHours() === 0) dayDivs.push(ms);
-  });
-
-  // Centers between midnights for date labels
+  tAxis.forEach(ms => { const d = new Date(ms); if (d.getHours() === 0) dayDivs.push(ms); });
   const dateCenters = [];
-  for (let i=0; i<dayDivs.length-1; i++){
-    dateCenters.push( (dayDivs[i] + dayDivs[i+1]) / 2 );
-  }
+  for (let i=0; i<dayDivs.length-1; i++){ dateCenters.push((dayDivs[i]+dayDivs[i+1])/2); }
 
-  // Per-day QPF for strip
   const qpfByDay = new Map();
-  qpf.forEach((val, t) => {
-    const d = new Date(t).toDateString();
-    qpfByDay.set(d, (qpfByDay.get(d) || 0) + (val || 0));
-  });
+  qpf.forEach((val, t) => { const d = new Date(t).toDateString(); qpfByDay.set(d, (qpfByDay.get(d)||0) + (val||0)); });
 
   const series = {
     tAxis, nightBands, dayDivs, dateCenters, qpfByDay,
     temperature: [], dewpoint: [], humidity: [], cloud: [], pop: [],
-    qpfHourly: [], wind: [], pressure: press ? [] : null,
-    snowfall: snowfall ? [] : null,
+    qpfHourly: [], wind: [], pressure: press ? [] : null, snowfall: snowfall ? [] : null,
   };
-
   tAxis.forEach(ms => {
     series.temperature.push(at(temp, ms));
     series.dewpoint.push(at(dew, ms));
@@ -204,14 +197,12 @@ function buildSeries(grid, hourly) {
     if (press) series.pressure.push(at(press, ms));
     if (snowfall) series.snowfall.push(at(snowfall, ms));
   });
-
   return series;
 }
 
-// Chart factory with plugins: night shading, crosshair, midnight lines, date labels (on top facet)
 function makeFacetChart(canvas, cfg){
   const ctx = canvas.getContext('2d');
-  const ch = new Chart(ctx, {
+  return new Chart(ctx, {
     type: 'line',
     data: { labels: cfg.labels, datasets: cfg.datasets },
     options: {
@@ -220,24 +211,7 @@ function makeFacetChart(canvas, cfg){
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
-        tooltip: {
-          enabled: true,
-          backgroundColor: 'rgba(255,255,255,0.96)',
-          borderColor: '#e5e7eb',
-          borderWidth: 1,
-          titleColor: '#111827',
-          bodyColor: '#111827',
-          displayColors: true,
-          boxPadding: 4,
-          callbacks: {
-            title(items){ const i = items[0].dataIndex; return fmtHour(cfg.labels[i]); },
-            label: (cfg.tooltipLabel || ((c)=>` ${c.dataset.label}: ${c.raw}`)),
-            labelColor(ctx){
-              const col = ctx.dataset.borderColor || '#111827';
-              return {borderColor: col, backgroundColor: col};
-            }
-          }
-        },
+        tooltip: { enabled: false }, // we render our own tags
         nightShade: { bands: cfg.nightBands || [], color: 'rgba(125,125,125,0.08)' },
         crosshair: { color: 'rgba(0,0,0,0.35)', width: 1 },
         dayDividers: { times: cfg.dayDivs || [], color: getCSS('--gridMid') },
@@ -276,7 +250,6 @@ function makeFacetChart(canvas, cfg){
         });
         ctx.restore();
 
-        // date labels (only if enabled, typically on top facet)
         const centers = chart.options.plugins.dateLabels?.centers || [];
         if (chart.options.plugins.dateLabels?.enabled){
           ctx.save();
@@ -299,6 +272,8 @@ function makeFacetChart(canvas, cfg){
         const area = chart.chartArea;
         const ctx = chart.ctx;
         const xpix = x.getPixelForValue(CROSSHAIR_TS);
+
+        // vertical crosshair
         ctx.save();
         ctx.strokeStyle = chart.options.plugins.crosshair?.color || 'rgba(0,0,0,0.35)';
         ctx.lineWidth = chart.options.plugins.crosshair?.width || 1;
@@ -307,10 +282,67 @@ function makeFacetChart(canvas, cfg){
         ctx.lineTo(xpix, area.bottom);
         ctx.stroke();
         ctx.restore();
+
+        // floating value tags near crosshair (WU-style)
+        const labels = chart.data.labels || [];
+        let idx = 0;
+        if (labels.length){
+          let lo=0, hi=labels.length-1, mid;
+          while (hi-lo>1){ mid=(hi+lo)>>1; if (labels[mid] < CROSSHAIR_TS) lo=mid; else hi=mid; }
+          idx = (Math.abs(labels[lo]-CROSSHAIR_TS) < Math.abs(labels[hi]-CROSSHAIR_TS)) ? lo : hi;
+        }
+        const padX = 6, radius = 6, xOffset = 8;
+        const drawTag = (y, text, color) => {
+          if (y==null || isNaN(y)) return;
+          const tx = xpix + xOffset;
+          const ty = y - 10;
+          ctx.save();
+          ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial';
+          const metrics = ctx.measureText(text);
+          const w = metrics.width + padX*2;
+          const h = 18;
+          ctx.fillStyle = 'rgba(255,255,255,0.70)';
+          ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(tx+radius, ty);
+          ctx.arcTo(tx+w, ty, tx+w, ty+h, radius);
+          ctx.arcTo(tx+w, ty+h, tx, ty+h, radius);
+          ctx.arcTo(tx, ty+h, tx, ty, radius);
+          ctx.arcTo(tx, ty, tx+w, ty, radius);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = color || '#111827';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, tx + padX, ty + h/2);
+          ctx.restore();
+        };
+
+        const ds = chart.data.datasets || [];
+        for (let k=0; k<ds.length; k++){
+          const d = ds[k]; if (d.hidden) continue;
+          const raw = d.data[idx];
+          if (raw == null) continue;
+          const yScale = chart.scales[d.yAxisID || 'y'];
+          const ypix = yScale.getPixelForValue(raw);
+          let valText = '';
+          const label = (d.label||'').toLowerCase();
+          if (label.includes('temperature')) valText = `${Math.round(raw)}°F`;
+          else if (label.includes('dew')) valText = `${Math.round(raw)}°F`;
+          else if (label.includes('humidity')) valText = `${Math.round(raw)}%`;
+          else if (label.includes('cloud')) valText = `${Math.round(raw)}%`;
+          else if (label.includes('chance')) valText = `${Math.round(raw)}%`;
+          else if (label.includes('wind')) valText = `${Math.round(raw)} mph`;
+          else if (label.includes('pressure')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
+          else if (label.includes('liquid')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
+          else valText = `${raw}`;
+          drawTag(ypix, valText, d.borderColor || '#111827');
+        }
       }
     }]
   });
-  return ch;
 }
 
 function sizeCanvasToParent(canvas){
@@ -380,11 +412,26 @@ async function loadByLatLon(lat, lon) {
   return { place: place || 'Selected location', daily, grid, hourly };
 }
 
+function clearOldChartsAndListeners(){
+  // destroy charts
+  for (const k of Object.keys(charts)){
+    try { charts[k].destroy(); } catch {}
+  }
+  charts = {};
+  // unbind listeners
+  for (const [el, type, fn] of boundHandlers){
+    try { el.removeEventListener(type, fn); } catch {}
+  }
+  boundHandlers = [];
+  if (resizeHandler){
+    window.removeEventListener('resize', resizeHandler);
+    resizeHandler = null;
+  }
+}
+
 function buildAllCharts(series){
   Object.values(els.canvases).forEach(c => c && sizeCanvasToParent(c));
   const labels = series.tAxis;
-
-  const baseTitle = items => fmtHour(labels[items[0].dataIndex]);
 
   charts.temp = makeFacetChart(els.canvases.temp, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs, dateCenters: series.dateCenters, showDateLabels: true,
@@ -421,16 +468,6 @@ function buildAllCharts(series){
       y: { position:'left', ticks:{ color:getCSS('--qpf') }, grid:{ color:getCSS('--grid') } }
     }
   });
-  // Custom tooltip label with descriptor
-  charts.precip.options.plugins.tooltip.callbacks.label = (ctx) => {
-    const i = ctx.dataIndex;
-    const q = series.qpfHourly[i];
-    const isSnow = (series.snowfall && ((series.snowfall[i]||0) > 0)) || (series.temperature[i] != null && series.temperature[i] <= 34);
-    const snowIn = series.snowfall ? series.snowfall[i] : null;
-    const desc = precipDescriptor(q || 0, !!isSnow, snowIn);
-    const amount = (q == null ? '—' : `${(Math.round(q*100)/100).toFixed(2)} in`);
-    return desc ? ` ${amount} · ${desc}` : ` ${amount}`;
-  };
 
   charts.wind = makeFacetChart(els.canvases.wind, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
@@ -459,33 +496,34 @@ function buildAllCharts(series){
     els.pressFacet.style.display = 'none';
   }
 
-  // Crosshair + hover: attach to **all** canvases
-  const moveFromCanvas = (canvasKey) => (evt) => {
-    const ch = charts[canvasKey];
-    const rect = ch.canvas.getBoundingClientRect();
+  // hover on all charts -> sync crosshair & update readout
+  const moveFromChart = (chart) => (evt) => {
+    const rect = chart.canvas.getBoundingClientRect();
     const x = (evt.touches && evt.touches[0]) ? (evt.touches[0].clientX - rect.left) : (evt.clientX - rect.left);
-    const xScale = ch.scales.x;
-    const ts = xScale.getValueForPixel(x);
+    const ts = chart.scales.x.getValueForPixel(x);
     if (!ts) return;
     CROSSHAIR_TS = ts;
     Object.values(charts).forEach(c => c.update('none'));
     updateReadout(lastSeries, ts);
   };
-  for (const key of Object.keys(charts)){
-    const cv = charts[key].canvas;
-    cv.addEventListener('mousemove', moveFromCanvas(key));
-    cv.addEventListener('touchmove', moveFromCanvas(key), { passive:true });
+  for (const k of Object.keys(charts)){
+    const fn = moveFromChart(charts[k]);
+    charts[k].canvas.addEventListener('mousemove', fn);
+    charts[k].canvas.addEventListener('touchmove', fn, { passive:true });
+    boundHandlers.push([charts[k].canvas, 'mousemove', fn]);
+    boundHandlers.push([charts[k].canvas, 'touchmove', fn]);
   }
 
-  // Handle window resize
-  window.addEventListener('resize', () => {
+  // resize
+  resizeHandler = () => {
     for (const [k,canvas] of Object.entries(els.canvases)){
       if (!canvas) continue;
       sizeCanvasToParent(canvas);
       charts[k]?.resize(canvas.width, canvas.height);
       charts[k]?.update('none');
     }
-  });
+  };
+  window.addEventListener('resize', resizeHandler);
 }
 
 function getCSS(varName){ return getComputedStyle(document.documentElement).getPropertyValue(varName).trim(); }
@@ -500,6 +538,8 @@ function hexWithAlpha(hex, alpha){
 async function showForecast(lat, lon, labelOverride){
   els.place.textContent = 'Loading…';
   els.updated.textContent = '';
+
+  clearOldChartsAndListeners();
 
   const { place, daily, grid, hourly } = await loadByLatLon(lat, lon);
   const label = labelOverride || place || `${lat.toFixed(3)}, ${lon.toFixed(3)}`;

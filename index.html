@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <title>Forecast (NWS) — WUnderground Facets</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Client-side NWS forecast viewer with WUnderground-style facets, night shading, crosshair, and date labels." />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -29,27 +28,27 @@
 
     <section id="facetWrap" class="facet-wrap">
       <div class="facet" data-facet="temp">
-        <div class="facet-title"><span class="temp">Temperature</span> / <span class="dew">Dew Point</span> (°F)</div>
+        <div class="facet-title">Temperature / Dew Point (°F)</div>
         <canvas id="chart-temp" width="900" height="150" aria-label="Temperature and dew point"></canvas>
       </div>
 
       <div class="facet" data-facet="hcp">
-        <div class="facet-title"><span class="humid">Humidity</span> / <span class="cloud">Cloud Cover</span> / <span class="pop">Chance of Precip</span> (%)</div>
+        <div class="facet-title">Humidity / Cloud Cover / Chance of Precip (%)</div>
         <canvas id="chart-hcp" width="900" height="120" aria-label="Humidity, Cloud Cover, PoP"></canvas>
       </div>
 
       <div class="facet" data-facet="precip">
-        <div class="facet-title"><span class="qpf">Precipitation</span> (in)</div>
+        <div class="facet-title">Precipitation (in)</div>
         <canvas id="chart-precip" width="900" height="95" aria-label="Hourly liquid precipitation"></canvas>
       </div>
 
       <div class="facet" data-facet="wind">
-        <div class="facet-title"><span class="wind">Wind Speed</span> (mph)</div>
+        <div class="facet-title">Wind Speed (mph)</div>
         <canvas id="chart-wind" width="900" height="120" aria-label="Wind speed"></canvas>
       </div>
 
       <div class="facet" data-facet="press" id="facet-press" style="display:none;">
-        <div class="facet-title"><span class="press">Pressure</span> (inHg)</div>
+        <div class="facet-title">Pressure (inHg)</div>
         <canvas id="chart-press" width="900" height="120" aria-label="Pressure"></canvas>
       </div>
     </section>
