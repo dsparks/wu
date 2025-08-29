@@ -301,7 +301,7 @@ function makeFacetChart(canvas, cfg){
           const metrics = ctx.measureText(text);
           const w = metrics.width + padX*2;
           const h = 18;
-          ctx.fillStyle = 'rgba(255,255,255,0.70)';
+          ctx.fillStyle = 'rgba(255,255,255,0.95)';
           ctx.strokeStyle = 'rgba(0,0,0,0.08)';
           ctx.lineWidth = 1;
           ctx.beginPath();
