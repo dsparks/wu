@@ -1,28 +1,5 @@
-
-// Compute solar elevation angle (degrees) for given time, lat, lon using simplified NOAA algorithm
-function solarElevation(date, lat, lon){
-  const rad=Math.PI/180, deg=180/Math.PI;
-  const d=(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate(),
-                    date.getUTCHours(),date.getUTCMinutes())-Date.UTC(date.getUTCFullYear(),0,0))/86400000;
-  const g=357.529+0.98560028*d;
-  const q=280.459+0.98564736*d;
-  const L=q+1.915*Math.sin(g*rad)+0.020*Math.sin(2*g*rad);
-  const e=23.439-0.00000036*d;
-  const RA=Math.atan2(Math.cos(e*rad)*Math.sin(L*rad),Math.cos(L*rad))*deg;
-  const dec=Math.asin(Math.sin(e*rad)*Math.sin(L*rad))*deg;
-  const time=date.getUTCHours()+date.getUTCMinutes()/60;
-  const GMST=18.697374558+24.06570982441908*d;
-  const LST=(GMST+lon/15+time)%24;
-  const HA=(LST*15-RA);
-  const elev=Math.asin(Math.sin(lat*rad)*Math.sin(dec*rad)+Math.cos(lat*rad)*Math.cos(dec*rad)*Math.cos(HA*rad))*deg;
-  return elev;
-}
-
-/* v4.2.3 — stable build from v4.2 plus:
- * - Fix: destroy/rebuild charts & listeners on search (stale graph bug)
- * - Crosshair shared across facets
- * - Floating value tags at the crosshair (WU style); default tooltip disabled
- * - Hour-only titles in the shared readout; date labels on top facet
+/* v4.2 — date labels, crosshair on all facets, hour-only tooltips,
+ * and concise precip descriptors (rain/snow).
  */
 const els = {
   place: document.getElementById('placeName'),
@@ -45,8 +22,6 @@ const els = {
 let CROSSHAIR_TS = null;
 let charts = {};
 let lastSeries = null;
-let boundHandlers = [];
-let resizeHandler = null;
 
 const c2f = c => (c == null ? null : (c * 9) / 5 + 32);
 const mm2in = mm => (mm == null ? null : mm / 25.4);
@@ -57,7 +32,6 @@ const fmtF = v => (v == null ? '—' : `${Math.round(v)}°F`);
 const fmtIn = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} in`);
 const fmtMph = v => (v == null ? '—' : `${Math.round(v)} mph`);
 const fmtInHg = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} inHg`);
-
 const fmtHour = ms => new Date(ms).toLocaleString([], {hour:'numeric'});
 
 function parseValidTime(validTime) {
@@ -100,7 +74,7 @@ async function fetchJSON(url) {
   return res.json();
 }
 
-// Emoji mapping for day strip
+// Emoji mapping
 function forecastToEmoji(shortForecast) {
   const s = (shortForecast || '').toLowerCase();
   if (s.includes('thunder')) return '⛈️';
@@ -146,11 +120,11 @@ function renderDayStrip(daily, qpfByDay) {
   }
 }
 
-// concise descriptor for precip (rain/snow)
+// Precip descriptor (rain/snow) — concise, 1–3 words
 function precipDescriptor(qpfIn, isSnow, snowIn){
   if (!qpfIn || qpfIn <= 0) return '';
   if (isSnow){
-    const rate = snowIn != null ? snowIn : qpfIn * 10;
+    const rate = snowIn != null ? snowIn : qpfIn * 10; // 10:1 fallback
     if (rate < 0.1) return 'flurries';
     if (rate < 0.3) return 'light snow';
     if (rate < 0.6) return 'mod. snow';
@@ -178,7 +152,7 @@ function buildSeries(grid, hourly) {
 
   const tAxis = mergeTimeAxis(temp, dew, rh, cloud, pop, qpf, wspd, press || new Map());
 
-  // night shading from hourly flags
+  // Night bands from hourly isDaytime
   const h = hourly.properties?.periods || [];
   const nightBands = [];
   for (let i=0; i<h.length; i++){
@@ -192,47 +166,33 @@ function buildSeries(grid, hourly) {
     }
   }
 
-// midnight lines + date centers
-const dayDivs = [];
-const sunAlt = [];
+  // Day divider timestamps (midnight local)
+  const dayDivs = [];
+  tAxis.forEach(ms => {
+    const d = new Date(ms);
+    if (d.getHours() === 0) dayDivs.push(ms);
+  });
 
-tAxis.forEach(ms => {
-  const dateObj = new Date(ms);
-  // compute solar elevation at this timestamp
-  sunAlt.push(
-    solarElevation(dateObj, grid.geometry.coordinates[1], grid.geometry.coordinates[0])
-  );
-  if (dateObj.getHours() === 0) dayDivs.push(ms);
-});
+  // Centers between midnights for date labels
+  const dateCenters = [];
+  for (let i=0; i<dayDivs.length-1; i++){
+    dateCenters.push( (dayDivs[i] + dayDivs[i+1]) / 2 );
+  }
 
-const dateCenters = [];
-for (let i = 0; i < dayDivs.length - 1; i++) {
-  dateCenters.push((dayDivs[i] + dayDivs[i + 1]) / 2);
-}
+  // Per-day QPF for strip
+  const qpfByDay = new Map();
+  qpf.forEach((val, t) => {
+    const d = new Date(t).toDateString();
+    qpfByDay.set(d, (qpfByDay.get(d) || 0) + (val || 0));
+  });
 
-const qpfByDay = new Map();
-qpf.forEach((val, t) => {
-  const dateKey = new Date(t).toDateString();
-  qpfByDay.set(dateKey, (qpfByDay.get(dateKey) || 0) + (val || 0));
-});
+  const series = {
+    tAxis, nightBands, dayDivs, dateCenters, qpfByDay,
+    temperature: [], dewpoint: [], humidity: [], cloud: [], pop: [],
+    qpfHourly: [], wind: [], pressure: press ? [] : null,
+    snowfall: snowfall ? [] : null,
+  };
 
-const series = {
-  sunAlt,
-  tAxis,
-  nightBands,
-  dayDivs,
-  dateCenters,
-  qpfByDay,
-  temperature: [],
-  dewpoint: [],
-  humidity: [],
-  cloud: [],
-  pop: [],
-  qpfHourly: [],
-  wind: [],
-  pressure: press ? [] : null,
-  snowfall: snowfall ? [] : null,
-};
   tAxis.forEach(ms => {
     series.temperature.push(at(temp, ms));
     series.dewpoint.push(at(dew, ms));
@@ -244,12 +204,14 @@ const series = {
     if (press) series.pressure.push(at(press, ms));
     if (snowfall) series.snowfall.push(at(snowfall, ms));
   });
+
   return series;
 }
 
+// Chart factory with plugins: night shading, crosshair, midnight lines, date labels (on top facet)
 function makeFacetChart(canvas, cfg){
   const ctx = canvas.getContext('2d');
-  return new Chart(ctx, {
+  const ch = new Chart(ctx, {
     type: 'line',
     data: { labels: cfg.labels, datasets: cfg.datasets },
     options: {
@@ -258,7 +220,13 @@ function makeFacetChart(canvas, cfg){
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
-        tooltip: { enabled: false }, // we render our own tags
+        tooltip: {
+          enabled: true,
+          callbacks: {
+            title(items){ const i = items[0].dataIndex; return fmtHour(cfg.labels[i]); },
+            label: (cfg.tooltipLabel || ((c)=>` ${c.dataset.label}: ${c.raw}`))
+          }
+        },
         nightShade: { bands: cfg.nightBands || [], color: 'rgba(125,125,125,0.08)' },
         crosshair: { color: 'rgba(0,0,0,0.35)', width: 1 },
         dayDividers: { times: cfg.dayDivs || [], color: getCSS('--gridMid') },
@@ -297,6 +265,7 @@ function makeFacetChart(canvas, cfg){
         });
         ctx.restore();
 
+        // date labels (only if enabled, typically on top facet)
         const centers = chart.options.plugins.dateLabels?.centers || [];
         if (chart.options.plugins.dateLabels?.enabled){
           ctx.save();
@@ -319,8 +288,6 @@ function makeFacetChart(canvas, cfg){
         const area = chart.chartArea;
         const ctx = chart.ctx;
         const xpix = x.getPixelForValue(CROSSHAIR_TS);
-
-        // vertical crosshair
         ctx.save();
         ctx.strokeStyle = chart.options.plugins.crosshair?.color || 'rgba(0,0,0,0.35)';
         ctx.lineWidth = chart.options.plugins.crosshair?.width || 1;
@@ -329,67 +296,10 @@ function makeFacetChart(canvas, cfg){
         ctx.lineTo(xpix, area.bottom);
         ctx.stroke();
         ctx.restore();
-
-        // floating value tags near crosshair (WU-style)
-        const labels = chart.data.labels || [];
-        let idx = 0;
-        if (labels.length){
-          let lo=0, hi=labels.length-1, mid;
-          while (hi-lo>1){ mid=(hi+lo)>>1; if (labels[mid] < CROSSHAIR_TS) lo=mid; else hi=mid; }
-          idx = (Math.abs(labels[lo]-CROSSHAIR_TS) < Math.abs(labels[hi]-CROSSHAIR_TS)) ? lo : hi;
-        }
-        const padX = 6, radius = 6, xOffset = 8;
-        const drawTag = (y, text, color) => {
-          if (y==null || isNaN(y)) return;
-          const tx = xpix + xOffset;
-          const ty = y - 10;
-          ctx.save();
-          ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial';
-          const metrics = ctx.measureText(text);
-          const w = metrics.width + padX*2;
-          const h = 18;
-          ctx.fillStyle = 'rgba(255,255,255,0.70)';
-          ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(tx+radius, ty);
-          ctx.arcTo(tx+w, ty, tx+w, ty+h, radius);
-          ctx.arcTo(tx+w, ty+h, tx, ty+h, radius);
-          ctx.arcTo(tx, ty+h, tx, ty, radius);
-          ctx.arcTo(tx, ty, tx+w, ty, radius);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-
-          ctx.fillStyle = color || '#111827';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(text, tx + padX, ty + h/2);
-          ctx.restore();
-        };
-
-        const ds = chart.data.datasets || [];
-        for (let k=0; k<ds.length; k++){
-          const d = ds[k]; if (d.hidden) continue;
-          const raw = d.data[idx];
-          if (raw == null) continue;
-          const yScale = chart.scales[d.yAxisID || 'y'];
-          const ypix = yScale.getPixelForValue(raw);
-          let valText = '';
-          const label = (d.label||'').toLowerCase();
-          if (label.includes('temperature')) valText = `${Math.round(raw)}°F`;
-          else if (label.includes('dew')) valText = `${Math.round(raw)}°F`;
-          else if (label.includes('humidity')) valText = `${Math.round(raw)}%`;
-          else if (label.includes('cloud')) valText = `${Math.round(raw)}%`;
-          else if (label.includes('chance')) valText = `${Math.round(raw)}%`;
-          else if (label.includes('wind')) valText = `${Math.round(raw)} mph`;
-          else if (label.includes('pressure')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
-          else if (label.includes('liquid')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
-          else valText = `${raw}`;
-          drawTag(ypix, valText, d.borderColor || '#111827');
-        }
       }
     }]
   });
+  return ch;
 }
 
 function sizeCanvasToParent(canvas){
@@ -459,26 +369,11 @@ async function loadByLatLon(lat, lon) {
   return { place: place || 'Selected location', daily, grid, hourly };
 }
 
-function clearOldChartsAndListeners(){
-  // destroy charts
-  for (const k of Object.keys(charts)){
-    try { charts[k].destroy(); } catch {}
-  }
-  charts = {};
-  // unbind listeners
-  for (const [el, type, fn] of boundHandlers){
-    try { el.removeEventListener(type, fn); } catch {}
-  }
-  boundHandlers = [];
-  if (resizeHandler){
-    window.removeEventListener('resize', resizeHandler);
-    resizeHandler = null;
-  }
-}
-
 function buildAllCharts(series){
   Object.values(els.canvases).forEach(c => c && sizeCanvasToParent(c));
   const labels = series.tAxis;
+
+  const baseTitle = items => fmtHour(labels[items[0].dataIndex]);
 
   charts.temp = makeFacetChart(els.canvases.temp, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs, dateCenters: series.dateCenters, showDateLabels: true,
@@ -508,28 +403,25 @@ function buildAllCharts(series){
   charts.precip = makeFacetChart(els.canvases.precip, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
-      { label:'Hourly Liquid (in)', data: series.qpfHourly, type:'bar', yAxisID:'y', backgroundColor:getCSS('--qpf'), borderWidth:0,
-        tooltipLabel: (c)=>{ const val=c.raw; if(val==null)return ''; const desc=precipDescriptor(val,false); return `${val.toFixed(2)} in${desc? ' – '+desc:''}`; } },
+      { label:'Hourly Liquid (in)', data: series.qpfHourly, type:'bar', yAxisID:'y', backgroundColor:getCSS('--qpf'), borderWidth:0 },
     ],
     scales: {
       x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
       y: { position:'left', ticks:{ color:getCSS('--qpf') }, grid:{ color:getCSS('--grid') } }
     }
   });
+  // Custom tooltip label with descriptor
+  charts.precip.options.plugins.tooltip.callbacks.label = (ctx) => {
+    const i = ctx.dataIndex;
+    const q = series.qpfHourly[i];
+    const isSnow = (series.snowfall && ((series.snowfall[i]||0) > 0)) || (series.temperature[i] != null && series.temperature[i] <= 34);
+    const snowIn = series.snowfall ? series.snowfall[i] : null;
+    const desc = precipDescriptor(q || 0, !!isSnow, snowIn);
+    const amount = (q == null ? '—' : `${(Math.round(q*100)/100).toFixed(2)} in`);
+    return desc ? ` ${amount} · ${desc}` : ` ${amount}`;
+  };
 
-  
-  charts.sun = makeFacetChart(els.canvases.sun, {
-    labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
-    datasets: [
-      { label:'Sun Elevation (°)', data: series.sunAlt, borderColor:'#f59e0b', backgroundColor:'transparent', yAxisID:'y', tension:0.3, pointRadius:0, spanGaps:true },
-      { label:'Horizon', data: series.tAxis.map(_=>0), borderColor:'#6b7280', borderDash:[4,4], yAxisID:'y', pointRadius:0 }
-    ],
-    scales: {
-      x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
-      y: { position:'left', min:-10, max:90, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } }
-    }
-  });
-charts.wind = makeFacetChart(els.canvases.wind, {
+  charts.wind = makeFacetChart(els.canvases.wind, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
       { label:'Wind (mph)', data: series.wind, borderColor:getCSS('--wind'), backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:2, spanGaps:true },
@@ -556,34 +448,33 @@ charts.wind = makeFacetChart(els.canvases.wind, {
     els.pressFacet.style.display = 'none';
   }
 
-  // hover on all charts -> sync crosshair & update readout
-  const moveFromChart = (chart) => (evt) => {
-    const rect = chart.canvas.getBoundingClientRect();
+  // Crosshair + hover: attach to **all** canvases
+  const moveFromCanvas = (canvasKey) => (evt) => {
+    const ch = charts[canvasKey];
+    const rect = ch.canvas.getBoundingClientRect();
     const x = (evt.touches && evt.touches[0]) ? (evt.touches[0].clientX - rect.left) : (evt.clientX - rect.left);
-    const ts = chart.scales.x.getValueForPixel(x);
+    const xScale = ch.scales.x;
+    const ts = xScale.getValueForPixel(x);
     if (!ts) return;
     CROSSHAIR_TS = ts;
     Object.values(charts).forEach(c => c.update('none'));
     updateReadout(lastSeries, ts);
   };
-  for (const k of Object.keys(charts)){
-    const fn = moveFromChart(charts[k]);
-    charts[k].canvas.addEventListener('mousemove', fn);
-    charts[k].canvas.addEventListener('touchmove', fn, { passive:true });
-    boundHandlers.push([charts[k].canvas, 'mousemove', fn]);
-    boundHandlers.push([charts[k].canvas, 'touchmove', fn]);
+  for (const key of Object.keys(charts)){
+    const cv = charts[key].canvas;
+    cv.addEventListener('mousemove', moveFromCanvas(key));
+    cv.addEventListener('touchmove', moveFromCanvas(key), { passive:true });
   }
 
-  // resize
-  resizeHandler = () => {
+  // Handle window resize
+  window.addEventListener('resize', () => {
     for (const [k,canvas] of Object.entries(els.canvases)){
       if (!canvas) continue;
       sizeCanvasToParent(canvas);
       charts[k]?.resize(canvas.width, canvas.height);
       charts[k]?.update('none');
     }
-  };
-  window.addEventListener('resize', resizeHandler);
+  });
 }
 
 function getCSS(varName){ return getComputedStyle(document.documentElement).getPropertyValue(varName).trim(); }
@@ -598,8 +489,6 @@ function hexWithAlpha(hex, alpha){
 async function showForecast(lat, lon, labelOverride){
   els.place.textContent = 'Loading…';
   els.updated.textContent = '';
-
-  clearOldChartsAndListeners();
 
   const { place, daily, grid, hourly } = await loadByLatLon(lat, lon);
   const label = labelOverride || place || `${lat.toFixed(3)}, ${lon.toFixed(3)}`;

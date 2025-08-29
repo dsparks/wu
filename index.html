@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Forecast (NWS) — WUnderground Facets</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Client-side NWS forecast viewer with WUnderground-style facets, night shading, crosshair, and date labels." />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -45,11 +46,6 @@
       <div class="facet" data-facet="wind">
         <div class="facet-title">Wind Speed (mph)</div>
         <canvas id="chart-wind" width="900" height="120" aria-label="Wind speed"></canvas>
-      </div>
-
-      <div class="facet" data-facet="sun">
-        <div class="facet-title">Solar Elevation (°)</div>
-        <canvas id="chart-sun" width="900" height="120" aria-label="Solar elevation"></canvas>
       </div>
 
       <div class="facet" data-facet="press" id="facet-press" style="display:none;">
