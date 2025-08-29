@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Forecast (NWS) — WUnderground Facets</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Client-side NWS forecast viewer with WUnderground-style facets, night shading, crosshair, and date labels." />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -12,27 +13,54 @@
   <header class="topbar">
     <div class="brand">Forecast</div>
     <form id="searchForm" class="search" autocomplete="off">
-      <input id="searchInput" type="text" placeholder="Search city, state or ZIP…" />
-      <button type="submit">Search</button>
-      <button type="button" id="useMyLocation">📍</button>
+      <input id="searchInput" type="text" placeholder="Search city, state or ZIP…" aria-label="Search city, state or ZIP" />
+      <button type="submit" title="Search">Search</button>
+      <button type="button" id="useMyLocation" title="Use my location">📍</button>
     </form>
   </header>
+
   <main>
     <section class="meta">
       <div id="placeName" class="place">—</div>
       <div id="updatedAt" class="updated">—</div>
     </section>
-    <section id="dayStrip" class="day-strip"></section>
+
+    <section id="dayStrip" class="day-strip" aria-label="Daily overview cards (daytime periods)"></section>
+
     <section id="facetWrap" class="facet-wrap">
-      <div class="facet"><div class="facet-title">Temperature / Dew Point (°F)</div><canvas id="chart-temp" width="900" height="150"></canvas></div>
-      <div class="facet"><div class="facet-title">Humidity / Cloud Cover / Chance of Precip (%)</div><canvas id="chart-hcp" width="900" height="120"></canvas></div>
-      <div class="facet"><div class="facet-title">Precipitation (in)</div><canvas id="chart-precip" width="900" height="95"></canvas></div>
-      <div class="facet"><div class="facet-title">Wind Speed (mph)</div><canvas id="chart-wind" width="900" height="120"></canvas></div>
-      <div class="facet" id="facet-press" style="display:none;"><div class="facet-title">Pressure (inHg)</div><canvas id="chart-press" width="900" height="120"></canvas></div>
+      <div class="facet" data-facet="temp">
+        <div class="facet-title">Temperature / Dew Point (°F)</div>
+        <canvas id="chart-temp" width="900" height="150" aria-label="Temperature and dew point"></canvas>
+      </div>
+
+      <div class="facet" data-facet="hcp">
+        <div class="facet-title">Humidity / Cloud Cover / Chance of Precip (%)</div>
+        <canvas id="chart-hcp" width="900" height="120" aria-label="Humidity, Cloud Cover, PoP"></canvas>
+      </div>
+
+      <div class="facet" data-facet="precip">
+        <div class="facet-title">Precipitation (in)</div>
+        <canvas id="chart-precip" width="900" height="95" aria-label="Hourly liquid precipitation"></canvas>
+      </div>
+
+      <div class="facet" data-facet="wind">
+        <div class="facet-title">Wind Speed (mph)</div>
+        <canvas id="chart-wind" width="900" height="120" aria-label="Wind speed"></canvas>
+      </div>
+
+      <div class="facet" data-facet="press" id="facet-press" style="display:none;">
+        <div class="facet-title">Pressure (inHg)</div>
+        <canvas id="chart-press" width="900" height="120" aria-label="Pressure"></canvas>
+      </div>
     </section>
-    <div id="hoverReadout" class="hover-readout"></div>
+
+    <div id="hoverReadout" class="hover-readout" aria-live="polite"></div>
   </main>
-  <footer><small>Client-side only. Data: NWS/NOAA.</small></footer>
+
+  <footer>
+    <small>Client-side only. Data: NWS/NOAA.</small>
+  </footer>
+
   <script src="app.js"></script>
 </body>
 </html>
