@@ -1,8 +1,13 @@
-# NWS Forecast Viewer — v3
+# NWS Forecast — v4 (WUnderground-style facets)
 
-**Runaway height fix**: The chart container uses `min-height`, `max-height`, `overflow:hidden`, and `contain: layout size paint` to break any ResizeObserver feedback loops. The hover readout is moved outside the chart container. Height is fixed at 520px (responsive width).
+Features:
+- Vertically **faceted** charts (temperature/dew, humidity/cloud, precip, wind, pressure).
+- Light **nighttime shading** using `forecastHourly.isDaytime` to generate bands.
+- **Vertical crosshair** synced across all facets + a consolidated hover readout (no emoji in tooltips).
+- Daily strip at the top using **emoji** (🌞, 🌥️, 🌧️, ⛈️, ❄️, 🌫️, …) mapped from `shortForecast`.
+- Fully static; GitHub Pages ready; no API keys.
 
-Files:
-- index.html
-- styles.css
-- app.js
+File list:
+- `index.html` — markup
+- `styles.css` — WUnderground-like light theme
+- `app.js` — data fetching, series prep, charts, shading, crosshair

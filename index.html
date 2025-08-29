@@ -2,12 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Forecast (NWS) — WUnderground-Style</title>
+  <title>Forecast (NWS) — WUnderground Facets</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Client-side NWS forecast viewer with hoverable timeseries." />
+  <meta name="description" content="Client-side NWS forecast viewer with WUnderground-style facets, night shading, and crosshair." />
   <link rel="stylesheet" href="styles.css" />
-
-  <!-- Chart.js + time adapter (date-fns) from CDNs -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
@@ -27,24 +25,32 @@
       <div id="updatedAt" class="updated">—</div>
     </section>
 
-    <section id="days" class="days" aria-label="Daily overview cards (daytime periods)"></section>
+    <section id="dayStrip" class="day-strip" aria-label="Daily overview cards (daytime periods)"></section>
 
-    <section class="chart-wrap">
-      <canvas id="forecastChart" aria-label="Hourly weather timeseries" role="img"></canvas>
+    <section id="facetWrap" class="facet-wrap">
+      <div class="facet" data-facet="temp">
+        <div class="facet-title">Temperature / Dew Point (°F)</div>
+        <canvas id="chart-temp" width="900" height="150" aria-label="Temperature and dew point"></canvas>
+      </div>
+      <div class="facet" data-facet="humid">
+        <div class="facet-title">Humidity / Cloud Cover (%)</div>
+        <canvas id="chart-humid" width="900" height="120" aria-label="Humidity and cloud cover"></canvas>
+      </div>
+      <div class="facet" data-facet="precip">
+        <div class="facet-title">Precipitation (in) / Chance (%)</div>
+        <canvas id="chart-precip" width="900" height="120" aria-label="Quantitative precip and probability"></canvas>
+      </div>
+      <div class="facet" data-facet="wind">
+        <div class="facet-title">Wind Speed (mph)</div>
+        <canvas id="chart-wind" width="900" height="120" aria-label="Wind speed"></canvas>
+      </div>
+      <div class="facet" data-facet="press">
+        <div class="facet-title">Pressure (inHg)</div>
+        <canvas id="chart-press" width="900" height="120" aria-label="Pressure"></canvas>
+      </div>
     </section>
+
     <div id="hoverReadout" class="hover-readout" aria-live="polite"></div>
-
-    <section class="legend">
-      <span class="legend-item temp">Temperature (°F)</span>
-      <span class="legend-item dew">Dew Point (°F)</span>
-      <span class="legend-item pop">Chance of Precip (%)</span>
-      <span class="legend-item cloud">Cloud Cover (%)</span>
-      <span class="legend-item hum">Humidity (%)</span>
-      <span class="legend-item wind">Wind (mph)</span>
-      <span class="legend-item press">Pressure (inHg)</span>
-      <span class="legend-item qpf">Hourly Liquid (in)</span>
-      <span class="legend-item qpfacc">Precip Accum (in)</span>
-    </section>
   </main>
 
   <footer>
