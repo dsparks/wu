@@ -615,10 +615,8 @@ async function showForecast(lat, lon, labelOverride){
   const series = buildSeries(grid, hourly);
   lastSeries = series;
 
-  const lat = grid.geometry.coordinates[1];
-  const lon = grid.geometry.coordinates[0];
-  const tz  = (timeZone || (points && points.properties && points.properties.timeZone)) || 'UTC'; // if you kept 'points' around
-  const sunTimes = computeSunriseSunsetPrecise(series, lat, lon, tz);
+  const tz = timeZone || 'UTC';
+  const sunTimes = computeSunriseSunsetPrecise(series, grid.geometry.coordinates[1], grid.geometry.coordinates[0], tz);
   renderDayStrip(daily, series.qpfByDay, sunTimes);
   buildAllCharts(series);
 
