@@ -1,3 +1,23 @@
+
+// Compute solar elevation angle (degrees) for given time, lat, lon using simplified NOAA algorithm
+function solarElevation(date, lat, lon){
+  const rad=Math.PI/180, deg=180/Math.PI;
+  const d=(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate(),
+                    date.getUTCHours(),date.getUTCMinutes())-Date.UTC(date.getUTCFullYear(),0,0))/86400000;
+  const g=357.529+0.98560028*d;
+  const q=280.459+0.98564736*d;
+  const L=q+1.915*Math.sin(g*rad)+0.020*Math.sin(2*g*rad);
+  const e=23.439-0.00000036*d;
+  const RA=Math.atan2(Math.cos(e*rad)*Math.sin(L*rad),Math.cos(L*rad))*deg;
+  const dec=Math.asin(Math.sin(e*rad)*Math.sin(L*rad))*deg;
+  const time=date.getUTCHours()+date.getUTCMinutes()/60;
+  const GMST=18.697374558+24.06570982441908*d;
+  const LST=(GMST+lon/15+time)%24;
+  const HA=(LST*15-RA);
+  const elev=Math.asin(Math.sin(lat*rad)*Math.sin(dec*rad)+Math.cos(lat*rad)*Math.cos(dec*rad)*Math.cos(HA*rad))*deg;
+  return elev;
+}
+
 /* v4.2.3 — stable build from v4.2 plus:
  * - Fix: destroy/rebuild charts & listeners on search (stale graph bug)
  * - Crosshair shared across facets
@@ -174,7 +194,8 @@ function buildSeries(grid, hourly) {
 
   // midnight lines + date centers
   const dayDivs = [];
-  tAxis.forEach(ms => { const d = new Date(ms); if (d.getHours() === 0) dayDivs.push(ms); });
+  tAxis.forEach(ms => {
+    const d=new Date(ms); series.sunAlt.push(solarElevation(d, grid.geometry.coordinates[1], grid.geometry.coordinates[0])); const d = new Date(ms); if (d.getHours() === 0) dayDivs.push(ms); });
   const dateCenters = [];
   for (let i=0; i<dayDivs.length-1; i++){ dateCenters.push((dayDivs[i]+dayDivs[i+1])/2); }
 
@@ -182,11 +203,13 @@ function buildSeries(grid, hourly) {
   qpf.forEach((val, t) => { const d = new Date(t).toDateString(); qpfByDay.set(d, (qpfByDay.get(d)||0) + (val||0)); });
 
   const series = {
+    sunAlt: [],
     tAxis, nightBands, dayDivs, dateCenters, qpfByDay,
     temperature: [], dewpoint: [], humidity: [], cloud: [], pop: [],
     qpfHourly: [], wind: [], pressure: press ? [] : null, snowfall: snowfall ? [] : null,
   };
   tAxis.forEach(ms => {
+    const d=new Date(ms); series.sunAlt.push(solarElevation(d, grid.geometry.coordinates[1], grid.geometry.coordinates[0]));
     series.temperature.push(at(temp, ms));
     series.dewpoint.push(at(dew, ms));
     series.humidity.push(at(rh, ms));
@@ -301,7 +324,7 @@ function makeFacetChart(canvas, cfg){
           const metrics = ctx.measureText(text);
           const w = metrics.width + padX*2;
           const h = 18;
-          ctx.fillStyle = 'rgba(255,255,255,0.95)';
+          ctx.fillStyle = 'rgba(255,255,255,0.70)';
           ctx.strokeStyle = 'rgba(0,0,0,0.08)';
           ctx.lineWidth = 1;
           ctx.beginPath();
@@ -448,14 +471,10 @@ function buildAllCharts(series){
   charts.hcp = makeFacetChart(els.canvases.hcp, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
-  { label:'Humidity (%)', data: series.humidity, borderColor:getCSS('--humid'),
-    backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
-  { label:'Cloud Cover (%)', data: series.cloud, borderColor:getCSS('--cloud'),
-    backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
-  { label:'Chance of Precip (%)', data: series.pop, borderColor:getCSS('--pop'),
-    backgroundColor:hexWithAlpha(getCSS('--pop'),0.25), yAxisID:'y',
-    tension:0.2, pointRadius:0, spanGaps:true, fill:true }
-],
+      { label:'Humidity (%)', data: series.humidity, borderColor:getCSS('--humid'), backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
+      { label:'Cloud Cover (%)', data: series.cloud, borderColor:'transparent', backgroundColor:hexWithAlpha(getCSS('--cloud'),0.35), yAxisID:'y', type:'line', fill:true, pointRadius:0, spanGaps:true },
+      { label:'Chance of Precip (%)', data: series.pop, borderColor:'transparent', backgroundColor:hexWithAlpha(getCSS('--pop'),0.35), yAxisID:'y', type:'line', fill:true, pointRadius:0, spanGaps:true },
+    ],
     scales: {
       x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
       y: { position:'left', min:0, max:100, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } }
@@ -465,20 +484,8 @@ function buildAllCharts(series){
   charts.precip = makeFacetChart(els.canvases.precip, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
-      {
-  label: 'Hourly Liquid (in)',
-  data: series.qpfHourly,
-  type: 'bar',
-  yAxisID: 'y',
-  backgroundColor: getCSS('--qpf'),
-  borderWidth: 0,
-  tooltipLabel: (c) => {
-    const val = c.raw;
-    if (val == null) return '';
-    const desc = precipDescriptor(val, false);
-    return `${val.toFixed(2)} in${desc ? ' – ' + desc : ''}`;
-  }
-},
+      { label:'Hourly Liquid (in)', data: series.qpfHourly, type:'bar', yAxisID:'y', backgroundColor:getCSS('--qpf'), borderWidth:0,
+        tooltipLabel: (c)=>{ const val=c.raw; if(val==null)return ''; const desc=precipDescriptor(val,false); return `${val.toFixed(2)} in${desc? ' – '+desc:''}`; } },
     ],
     scales: {
       x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
@@ -486,7 +493,19 @@ function buildAllCharts(series){
     }
   });
 
-  charts.wind = makeFacetChart(els.canvases.wind, {
+  
+  charts.sun = makeFacetChart(els.canvases.sun, {
+    labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
+    datasets: [
+      { label:'Sun Elevation (°)', data: series.sunAlt, borderColor:'#f59e0b', backgroundColor:'transparent', yAxisID:'y', tension:0.3, pointRadius:0, spanGaps:true },
+      { label:'Horizon', data: series.tAxis.map(_=>0), borderColor:'#6b7280', borderDash:[4,4], yAxisID:'y', pointRadius:0 }
+    ],
+    scales: {
+      x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
+      y: { position:'left', min:-10, max:90, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } }
+    }
+  });
+charts.wind = makeFacetChart(els.canvases.wind, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
       { label:'Wind (mph)', data: series.wind, borderColor:getCSS('--wind'), backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:2, spanGaps:true },
