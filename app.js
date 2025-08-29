@@ -235,8 +235,7 @@ function makeFacetChart(canvas, cfg){
       plugins: {
         legend: { display: false },
         tooltip: {
-          enabled: true,
-          position: 'away',
+          enabled: false,
           callbacks: {
             title(items){ const i = items[0].dataIndex; return fmtHour(cfg.labels[i]); },
             label: (cfg.tooltipLabel || ((c)=>` ${c.dataset.label}: ${c.raw}`))
@@ -298,6 +297,87 @@ function makeFacetChart(canvas, cfg){
       },
       afterDatasetsDraw(chart){
         if (CROSSHAIR_TS == null) return;
+        const x = chart.scales.x;
+        const area = chart.chartArea;
+        const ctx = chart.ctx;
+        const xpix = x.getPixelForValue(CROSSHAIR_TS);
+
+        // Draw crosshair
+        ctx.save();
+        ctx.strokeStyle = chart.options.plugins.crosshair?.color || 'rgba(0,0,0,0.35)';
+        ctx.lineWidth = chart.options.plugins.crosshair?.width || 1;
+        ctx.beginPath();
+        ctx.moveTo(xpix, area.top);
+        ctx.lineTo(xpix, area.bottom);
+        ctx.stroke();
+        ctx.restore();
+
+        // Floating value tags (WU-style) for each visible dataset
+        try{
+          const labels = chart.data.labels;
+          // Find nearest index to CROSSHAIR_TS
+          let idx = 0;
+          if (labels?.length){
+            let lo=0, hi=labels.length-1, mid;
+            while (hi-lo>1){ mid=(hi+lo)>>1; if (labels[mid] < CROSSHAIR_TS) lo=mid; else hi=mid; }
+            idx = (Math.abs(labels[lo]-CROSSHAIR_TS) < Math.abs(labels[hi]-CROSSHAIR_TS)) ? lo : hi;
+          }
+          const padX = 6, padY = 3, radius = 6, xOffset = 8;
+          const drawTag = (y, text, color) => {
+            if (y==null || isNaN(y)) return;
+            const tx = xpix + xOffset;
+            const ty = y - 10;
+            ctx.save();
+            ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial';
+            const metrics = ctx.measureText(text);
+            const w = metrics.width + padX*2;
+            const h = 18;
+            // translucent background
+            ctx.fillStyle = 'rgba(255,255,255,0.70)';
+            ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+            ctx.lineWidth = 1;
+            // rounded rect
+            const rx = tx, ry = ty;
+            ctx.beginPath();
+            ctx.moveTo(rx+radius, ry);
+            ctx.arcTo(rx+w, ry, rx+w, ry+h, radius);
+            ctx.arcTo(rx+w, ry+h, rx, ry+h, radius);
+            ctx.arcTo(rx, ry+h, rx, ry, radius);
+            ctx.arcTo(rx, ry, rx+w, ry, radius);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = color || '#111827';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, tx + padX, ry + h/2);
+            ctx.restore();
+          };
+
+          const ds = chart.data.datasets;
+          // Compute y pixel per dataset raw value at idx
+          for (let k=0; k<ds.length; k++){
+            const d = ds[k]; if (d.hidden) continue;
+            const yScale = chart.scales[d.yAxisID || 'y'];
+            const raw = d.data[idx];
+            if (raw == null) continue;
+            const ypix = yScale.getPixelForValue(raw);
+            // Format brief text depending on chart context
+            let valText = '';
+            const label = (d.label||'').toLowerCase();
+            if (label.includes('temperature')) valText = `${Math.round(raw)}°F`;
+            else if (label.includes('dew')) valText = `${Math.round(raw)}°F`;
+            else if (label.includes('humidity')) valText = `${Math.round(raw)}%`;
+            else if (label.includes('cloud')) valText = `${Math.round(raw)}%`;
+            else if (label.includes('chance')) valText = `${Math.round(raw)}%`;
+            else if (label.includes('wind')) valText = `${Math.round(raw)} mph`;
+            else if (label.includes('pressure')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
+            else if (label.includes('liquid')) valText = `${(Math.round(raw*100)/100).toFixed(2)} in`;
+            else valText = `${raw}`;
+
+            drawTag(ypix, valText, (d.borderColor || '#111827'));
+          }
+        }catch(e){/* ignore */}
         const x = chart.scales.x;
         const area = chart.chartArea;
         const ctx = chart.ctx;
