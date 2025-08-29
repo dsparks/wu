@@ -192,22 +192,47 @@ function buildSeries(grid, hourly) {
     }
   }
 
-  // midnight lines + date centers
-  const dayDivs = [];
-  tAxis.forEach(ms => {
-    const d=new Date(ms); series.sunAlt.push(solarElevation(d, grid.geometry.coordinates[1], grid.geometry.coordinates[0])); const d = new Date(ms); if (d.getHours() === 0) dayDivs.push(ms); });
-  const dateCenters = [];
-  for (let i=0; i<dayDivs.length-1; i++){ dateCenters.push((dayDivs[i]+dayDivs[i+1])/2); }
+// midnight lines + date centers
+const dayDivs = [];
+const sunAlt = [];
 
-  const qpfByDay = new Map();
-  qpf.forEach((val, t) => { const d = new Date(t).toDateString(); qpfByDay.set(d, (qpfByDay.get(d)||0) + (val||0)); });
+tAxis.forEach(ms => {
+  const dateObj = new Date(ms);
+  // compute solar elevation at this timestamp
+  sunAlt.push(
+    solarElevation(dateObj, grid.geometry.coordinates[1], grid.geometry.coordinates[0])
+  );
+  if (dateObj.getHours() === 0) dayDivs.push(ms);
+});
 
-  const series = {
-    sunAlt: [],
-    tAxis, nightBands, dayDivs, dateCenters, qpfByDay,
-    temperature: [], dewpoint: [], humidity: [], cloud: [], pop: [],
-    qpfHourly: [], wind: [], pressure: press ? [] : null, snowfall: snowfall ? [] : null,
-  };
+const dateCenters = [];
+for (let i = 0; i < dayDivs.length - 1; i++) {
+  dateCenters.push((dayDivs[i] + dayDivs[i + 1]) / 2);
+}
+
+const qpfByDay = new Map();
+qpf.forEach((val, t) => {
+  const dateKey = new Date(t).toDateString();
+  qpfByDay.set(dateKey, (qpfByDay.get(dateKey) || 0) + (val || 0));
+});
+
+const series = {
+  sunAlt,
+  tAxis,
+  nightBands,
+  dayDivs,
+  dateCenters,
+  qpfByDay,
+  temperature: [],
+  dewpoint: [],
+  humidity: [],
+  cloud: [],
+  pop: [],
+  qpfHourly: [],
+  wind: [],
+  pressure: press ? [] : null,
+  snowfall: snowfall ? [] : null,
+};
   tAxis.forEach(ms => {
     const d=new Date(ms); series.sunAlt.push(solarElevation(d, grid.geometry.coordinates[1], grid.geometry.coordinates[0]));
     series.temperature.push(at(temp, ms));
