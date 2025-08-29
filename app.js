@@ -448,10 +448,14 @@ function buildAllCharts(series){
   charts.hcp = makeFacetChart(els.canvases.hcp, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
-      { label:'Humidity (%)', data: series.humidity, borderColor:getCSS('--humid'), backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
-      { label:'Cloud Cover (%)', data: series.cloud, borderColor:'transparent', backgroundColor:hexWithAlpha(getCSS('--cloud'),0.35), yAxisID:'y', type:'line', fill:true, pointRadius:0, spanGaps:true },
-      { label:'Chance of Precip (%)', data: series.pop, borderColor:'transparent', backgroundColor:hexWithAlpha(getCSS('--pop'),0.35), yAxisID:'y', type:'line', fill:true, pointRadius:0, spanGaps:true },
-    ],
+  { label:'Humidity (%)', data: series.humidity, borderColor:getCSS('--humid'),
+    backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
+  { label:'Cloud Cover (%)', data: series.cloud, borderColor:getCSS('--cloud'),
+    backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
+  { label:'Chance of Precip (%)', data: series.pop, borderColor:getCSS('--pop'),
+    backgroundColor:hexWithAlpha(getCSS('--pop'),0.25), yAxisID:'y',
+    tension:0.2, pointRadius:0, spanGaps:true, fill:true }
+],
     scales: {
       x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
       y: { position:'left', min:0, max:100, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } }
@@ -461,7 +465,20 @@ function buildAllCharts(series){
   charts.precip = makeFacetChart(els.canvases.precip, {
     labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
     datasets: [
-      { label:'Hourly Liquid (in)', data: series.qpfHourly, type:'bar', yAxisID:'y', backgroundColor:getCSS('--qpf'), borderWidth:0 },
+      {
+  label: 'Hourly Liquid (in)',
+  data: series.qpfHourly,
+  type: 'bar',
+  yAxisID: 'y',
+  backgroundColor: getCSS('--qpf'),
+  borderWidth: 0,
+  tooltipLabel: (c) => {
+    const val = c.raw;
+    if (val == null) return '';
+    const desc = precipDescriptor(val, false);
+    return `${val.toFixed(2)} in${desc ? ' – ' + desc : ''}`;
+  }
+},
     ],
     scales: {
       x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
