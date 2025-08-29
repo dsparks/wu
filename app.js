@@ -90,131 +90,21 @@ function forecastToEmoji(shortForecast) {
   return '🌡️';
 }
 
-// Build a per-day map of sunrise/sunset by scanning hourly isDaytime transitions
-// Accurate sunrise/sunset from solar elevation zero-crossings (NOAA-style)
-function computeSunriseSunset(series, lat, lon, timeZone) {
-  const map = new Map(); // key: local date string -> { sunrise, sunset }
-  if (!series?.tAxis?.length) return map;
-
-  const sign = v => (v === 0 ? 0 : v > 0 ? 1 : -1);
-  const fmt  = ts => new Date(ts).toLocaleTimeString([], { timeZone, hour: 'numeric', minute: '2-digit' });
-
-  // Binary-search refine of the crossing time in [t0,t1]
-  const refine = (t0, t1) => {
-    for (let i = 0; i < 10; i++) {
-      const tm = (t0 + t1) / 2;
-      const e0 = solarElevation(new Date(t0), lat, lon);
-      const em = solarElevation(new Date(tm), lat, lon);
-      // keep the half interval that contains the sign change
-      if ((e0 <= 0 && em >= 0) || (e0 >= 0 && em <= 0)) t1 = tm; else t0 = tm;
-    }
-    return (t0 + t1) / 2;
-  };
-
-  for (let i = 1; i < series.tAxis.length; i++) {
-    const t0 = series.tAxis[i - 1];
-    const t1 = series.tAxis[i];
-
-    const e0 = solarElevation(new Date(t0), lat, lon);
-    const e1 = solarElevation(new Date(t1), lat, lon);
-    if (sign(e0) === sign(e1)) continue;       // no crossing in this interval
-
-    const tc = refine(t0, t1);                  // exact crossing timestamp
-    const dayKey = new Date(tc).toLocaleDateString([], { timeZone });
-    const rec = map.get(dayKey) || {};
-
-    if (e0 < 0 && e1 > 0 && !rec.sunrise) rec.sunrise = fmt(tc); // night->day
-    if (e0 > 0 && e1 < 0 && !rec.sunset)  rec.sunset  = fmt(tc); // day->night
-
-    map.set(dayKey, rec);
-  }
-  return map;
-}
-
-// Local-time formatter for a timestamp
-function fmtLocalTime(ts, timeZone) {
-  return new Date(ts).toLocaleTimeString([], { timeZone, hour: 'numeric', minute: '2-digit' });
-}
-
-// Refine the exact crossing time (sun elevation == 0) by binary search
-function refineSunCrossing(t0, t1, lat, lon) {
-  // 8–10 iterations is plenty; ~few seconds resolution
-  for (let i = 0; i < 10; i++) {
-    const tm = (t0 + t1) / 2;
-    const e0 = solarElevation(new Date(t0), lat, lon);
-    const em = solarElevation(new Date(tm), lat, lon);
-    // Keep the sub-interval that contains the zero-crossing
-    if ((e0 <= 0 && em >= 0) || (e0 >= 0 && em <= 0)) {
-      t1 = tm;
-    } else {
-      t0 = tm;
-    }
-  }
-  return (t0 + t1) / 2;
-}
-
-// Compute accurate per-day sunrise/sunset by scanning solar elevation sign changes
-function computeSunriseSunsetPrecise(series, lat, lon, timeZone) {
-  const map = new Map(); // key: dateString in timeZone -> { sunrise, sunset }
-  if (!series || !series.tAxis?.length) return map;
-
-  const sign = (v) => (v === 0 ? 0 : v > 0 ? 1 : -1);
-
-  for (let i = 1; i < series.tAxis.length; i++) {
-    const tPrev = series.tAxis[i - 1];
-    const tCur  = series.tAxis[i];
-
-    const ePrev = solarElevation(new Date(tPrev), lat, lon);
-    const eCur  = solarElevation(new Date(tCur),  lat, lon);
-
-    const sPrev = sign(ePrev);
-    const sCur  = sign(eCur);
-
-    if (sPrev === sCur) continue; // no crossing in this interval
-
-    // Crossing exists in [tPrev, tCur]; refine to exact time
-    const tCross = refineSunCrossing(tPrev, tCur, lat, lon);
-
-    // The "calendar day" should be computed in the *location's* time zone
-    const dayKey = new Date(tCross).toLocaleDateString([], { timeZone });
-
-    const rec = map.get(dayKey) || {};
-    if (ePrev < 0 && eCur > 0 && !rec.sunrise) {
-      // Night → Day
-      rec.sunrise = fmtLocalTime(tCross, timeZone);
-    } else if (ePrev > 0 && eCur < 0 && !rec.sunset) {
-      // Day → Night
-      rec.sunset = fmtLocalTime(tCross, timeZone);
-    }
-    map.set(dayKey, rec);
-  }
-  return map;
-}
-
-function renderDayStrip(daily, qpfByDay, sunTimes) {
+function renderDayStrip(daily, qpfByDay) {
   const daysEl = els.dayStrip;
   daysEl.innerHTML = '';
   const periods = (daily.properties?.periods || []).filter(p => p.isDaytime);
-
   periods.forEach(p => {
     const date = new Date(p.startTime);
     const name = date.toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' });
     const emoji = forecastToEmoji(p.shortForecast);
     const qpf = qpfByDay.get(date.toDateString()) || 0;
-
-    const sun = sunTimes?.get(date.toLocaleDateString([], { timeZone: sunTimes?.timeZone || undefined })) || {};
-    // Fallback: try key by Date.toDateString() if the above is undefined
-    const fallback = sunTimes?.get(date.toDateString()) || {};
-    const sr = sun.sunrise || fallback.sunrise || '—';
-    const ss = sun.sunset  || fallback.sunset  || '—';
-
     const card = document.createElement('div');
     card.className = 'day';
     card.innerHTML = `
       <div class="name">${name}</div>
       <div class="emoji" aria-hidden="true">${emoji}</div>
       <div class="temps"><span class="hi">${p.temperature}°F</span><span class="lo">${findNightLowFor(p, daily)}°F</span></div>
-      <div class="sun"><span class="sunline">🌅 ${sr}</span> · <span class="sunline">🌇 ${ss}</span></div>
       <div class="precip">${qpf.toFixed(2)} in</div>
     `;
     daysEl.appendChild(card);
@@ -487,7 +377,7 @@ async function loadByLatLon(lat, lon) {
   const hourlyUrl = props.forecastHourly;
 
   const [daily, grid, hourly] = await Promise.all([fetchJSON(foreUrl), fetchJSON(gridUrl), fetchJSON(hourlyUrl)]);
-  return { place: place || 'Selected location', daily, grid, hourly, timeZone: props.timeZone || 'UTC' };
+  return { place: place || 'Selected location', daily, grid, hourly };
 }
 
 function buildAllCharts(series){
@@ -615,7 +505,7 @@ async function showForecast(lat, lon, labelOverride){
   els.place.textContent = 'Loading…';
   els.updated.textContent = '';
 
-  const { place, daily, grid, hourly, timeZone } = await loadByLatLon(lat, lon);
+  const { place, daily, grid, hourly } = await loadByLatLon(lat, lon);
   const label = labelOverride || place || `${lat.toFixed(3)}, ${lon.toFixed(3)}`;
   els.place.textContent = label;
   const upd = grid.properties.updateTime || daily.properties.updated || new Date().toISOString();
@@ -624,9 +514,7 @@ async function showForecast(lat, lon, labelOverride){
   const series = buildSeries(grid, hourly);
   lastSeries = series;
 
-  const tz = timeZone || 'UTC'; // timeZone should come from loadByLatLon()
-  const sunTimes = computeSunriseSunset(series, grid.geometry.coordinates[1], grid.geometry.coordinates[0], tz);
-  renderDayStrip(daily, series.qpfByDay, sunTimes);
+  renderDayStrip(daily, series.qpfByDay);
   buildAllCharts(series);
 
   if (series.tAxis.length){
