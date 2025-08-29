@@ -222,9 +222,20 @@ function makeFacetChart(canvas, cfg){
         legend: { display: false },
         tooltip: {
           enabled: true,
+          backgroundColor: 'rgba(255,255,255,0.96)',
+          borderColor: '#e5e7eb',
+          borderWidth: 1,
+          titleColor: '#111827',
+          bodyColor: '#111827',
+          displayColors: true,
+          boxPadding: 4,
           callbacks: {
             title(items){ const i = items[0].dataIndex; return fmtHour(cfg.labels[i]); },
-            label: (cfg.tooltipLabel || ((c)=>` ${c.dataset.label}: ${c.raw}`))
+            label: (cfg.tooltipLabel || ((c)=>` ${c.dataset.label}: ${c.raw}`)),
+            labelColor(ctx){
+              const col = ctx.dataset.borderColor || '#111827';
+              return {borderColor: col, backgroundColor: col};
+            }
           }
         },
         nightShade: { bands: cfg.nightBands || [], color: 'rgba(125,125,125,0.08)' },

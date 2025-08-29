@@ -78,3 +78,13 @@ canvas{display:block; width:100%}
   margin-top:.6rem; color:var(--muted); font-family:ui-monospace,Consolas,Menlo,monospace;
   font-size:.92rem;
 }
+
+/* Colored labels for facet titles to match series colors */
+.facet-title .temp{color:var(--temp); font-weight:600;}
+.facet-title .dew{color:var(--dew); font-weight:600;}
+.facet-title .humid{color:var(--humid); font-weight:600;}
+.facet-title .cloud{color:var(--cloud); font-weight:600;}
+.facet-title .pop{color:var(--pop); font-weight:600;}
+.facet-title .qpf{color:var(--qpf); font-weight:600;}
+.facet-title .wind{color:var(--wind); font-weight:600;}
+.facet-title .press{color:var(--press); font-weight:600;}
