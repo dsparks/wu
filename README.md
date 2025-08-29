@@ -1,12 +1,9 @@
-# NWS Forecast — v4.2
+# NWS Forecast — v4.3
 
-Adds:
-- **Date labels** centered between midnight dividers (top facet).
-- Crosshair + hover from **any facet** (not only the top plot).
-- **Hour-only** tooltip titles (e.g., “8 AM”).
-- **Concise precipitation descriptors** in precip tooltip:
-  - Rain (liquid): misty · drizzle · light rain · moderate · downpour
-  - Snow: flurries · light snow · mod. snow · heavy snow
-  - Detects snow via `snowfallAmount` or (fallback) cold temps.
+Bug fix & polish:
+- Search bug fixed — charts are destroyed/rebuilt when you search; graphs now reflect the new location.
+- Tooltip position moved away from cursor.
+- Hour-only titles, date labels, midnight dividers, emoji day strip, etc.
 
-Still static and GitHub Pages–ready.
+About "10 days":
+NWS hourly/grid feeds provide ~6–7 days of hourly data, not 10. Full 10-day requires another source.
