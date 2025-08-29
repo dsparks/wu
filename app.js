@@ -1,8 +1,8 @@
-/* Client-side NWS forecast viewer
- * - Geolocates on load; fallback: search city/state or ZIP (ZIP via Zippopotam, place via Nominatim)
- * - Pulls forecast + grid (hourly) from NWS
- * - Renders a single multi-axis Chart.js time-series with interactive tooltip
- * - Units: Fahrenheit default; pressure in inHg; wind mph; precip inches
+/* NWS Forecast Viewer — v2
+ * Fixes:
+ *  - No weird vertical stretching: parent has fixed height; canvas fills it; animations off.
+ *  - Hover works even when Chart.js doesn't select elements: manual nearest-x readout.
+ *  - Styling nudged toward WUnderground.
  */
 
 const els = {
@@ -17,6 +17,7 @@ const els = {
 };
 
 let chart; // Chart.js instance
+let lastSeries; // keep series for manual hover
 
 // ---------- Utilities ----------
 const c2f = c => (c == null ? null : (c * 9) / 5 + 32);
@@ -24,9 +25,6 @@ const mm2in = mm => (mm == null ? null : mm / 25.4);
 const kmh2mph = kmh => (kmh == null ? null : kmh * 0.621371);
 const pa2inhg = pa => (pa == null ? null : pa / 3386.389);
 
-/** Parse NWS validTime like "2025-08-29T18:00:00+00:00/PT1H"
- * returns { start: Date, hours: number }
- */
 function parseValidTime(validTime) {
   const [startIso, durationIso] = validTime.split('/');
   const start = new Date(startIso);
@@ -42,9 +40,8 @@ function parseValidTime(validTime) {
   return { start, hours };
 }
 
-/** Build an hourly series for a grid property (values array with validTime + value) */
 function expandHourly(values, convertFn) {
-  const map = new Map(); // timestamp(ms) -> value
+  const map = new Map();
   values.forEach(v => {
     if (v.value == null || !v.validTime) return;
     const { start, hours } = parseValidTime(v.validTime);
@@ -57,17 +54,14 @@ function expandHourly(values, convertFn) {
   return map;
 }
 
-/** Merge many hourly maps into a sorted array of timestamps present in at least one */
 function mergeTimeAxis(...maps) {
   const keys = new Set();
   maps.forEach(m => m && m.forEach((_, k) => keys.add(k)));
   return Array.from(keys).sort((a, b) => a - b);
 }
 
-/** Extract value from map (or null) */
 const at = (map, t) => (map && map.has(t) ? map.get(t) : null);
 
-/** Formatters */
 const fmtPct = v => (v == null ? '—' : `${Math.round(v)}%`);
 const fmtF = v => (v == null ? '—' : `${Math.round(v)}°F`);
 const fmtIn = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} in`);
@@ -85,7 +79,6 @@ async function fetchJSON(url) {
 async function geocodeQuery(q) {
   const zip = q.trim().match(/^\d{5}$/);
   if (zip) {
-    // Zippopotam.us for US ZIP → lat/lon
     const j = await fetchJSON(`https://api.zippopotam.us/us/${zip[0]}`);
     const place = j.places && j.places[0];
     if (!place) throw new Error('ZIP not found.');
@@ -95,7 +88,6 @@ async function geocodeQuery(q) {
       label: `${j['post code']} ${place['place name']}, ${place['state abbreviation']}`
     };
   } else {
-    // Nominatim for general place search (US-biased)
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}&addressdetails=1&email=noreply@example.com`;
     const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
     if (!res.ok) throw new Error('Place search failed.');
@@ -117,9 +109,7 @@ async function loadByLatLon(lat, lon) {
   const foreUrl = props.forecast;
   const gridUrl = props.forecastGridData;
 
-  // Fetch daily (icons) + grid (hourly)
   const [daily, grid] = await Promise.all([fetchJSON(foreUrl), fetchJSON(gridUrl)]);
-
   return { place: place || 'Selected location', daily, grid };
 }
 
@@ -156,7 +146,6 @@ function renderDailyCards(forecastJSON) {
 function buildChartDatasets(grid) {
   const g = grid.properties;
 
-  // Expand each grid series to hourly maps
   const temp = expandHourly(g.temperature.values, c2f);
   const dew = expandHourly(g.dewpoint.values, c2f);
   const rh = expandHourly(g.relativeHumidity.values, v => v);
@@ -208,16 +197,18 @@ function renderChart(series) {
       { // Temperature
         label: 'Temperature (°F)',
         data: series.temperature,
-        borderColor: getComputedStyle(document.documentElement).getPropertyValue('--temp').trim(),
+        borderColor: getCSS('--temp'),
         backgroundColor: 'transparent',
-        tension: 0.25, pointRadius: 1.5, yAxisID: 'y',
+        tension: 0.35, pointRadius: 1.5, yAxisID: 'y', cubicInterpolationMode: 'monotone',
+        spanGaps: true,
       },
       { // Dew Point
         label: 'Dew Point (°F)',
         data: series.dewpoint,
-        borderColor: getComputedStyle(document.documentElement).getPropertyValue('--dew').trim(),
+        borderColor: getCSS('--dew'),
         backgroundColor: 'transparent',
-        tension: 0.25, pointRadius: 1.5, yAxisID: 'y',
+        tension: 0.35, pointRadius: 1, yAxisID: 'y', cubicInterpolationMode: 'monotone',
+        spanGaps: true,
       },
       { // Chance of Precip
         label: 'Chance of Precip (%)',
@@ -238,21 +229,21 @@ function renderChart(series) {
         data: series.humidity,
         borderColor: getCSS('--hum'),
         backgroundColor: 'transparent',
-        tension: 0.2, pointRadius: 0, yAxisID: 'yPct',
+        tension: 0.2, pointRadius: 0, yAxisID: 'yPct', spanGaps: true,
       },
       { // Wind
         label: 'Wind (mph)',
         data: series.wind,
         borderColor: getCSS('--wind'),
         backgroundColor: 'transparent',
-        pointRadius: 0, tension: 0.2, yAxisID: 'yWind',
+        pointRadius: 0, tension: 0.2, yAxisID: 'yWind', spanGaps: true,
       },
       { // Pressure
         label: 'Pressure (inHg)',
         data: series.pressure,
         borderColor: getCSS('--press'),
         backgroundColor: 'transparent',
-        pointRadius: 0, tension: 0.2, yAxisID: 'yPress',
+        pointRadius: 0, tension: 0.2, yAxisID: 'yPress', spanGaps: true,
       },
       { // QPF hourly
         type: 'bar',
@@ -269,18 +260,21 @@ function renderChart(series) {
         data: series.qpfAccum,
         borderColor: getCSS('--qpfacc'),
         backgroundColor: 'transparent',
-        pointRadius: 0, tension: 0.2, yAxisID: 'yQpf',
+        pointRadius: 0, tension: 0.2, yAxisID: 'yQpf', spanGaps: true,
       },
     ]
   };
 
   const options = {
     responsive: true,
-    maintainAspectRatio: false,
+    maintainAspectRatio: false, // canvas fills parent height
+    resizeDelay: 0,
+    animation: false,           // disable animations to prevent stretch-on-load
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: { display: false },
       tooltip: {
+        enabled: true,
         callbacks: {
           title(items){
             const i = items[0].dataIndex;
@@ -304,7 +298,7 @@ function renderChart(series) {
       x: {
         type: 'time',
         time: { unit: 'hour', tooltipFormat: 'EEE MMM d h a' },
-        ticks: { color: '#a6b0bf' },
+        ticks: { color: '#9fb0c6' },
         grid: { color: 'rgba(255,255,255,.06)' }
       },
       y: { // °F
@@ -332,18 +326,32 @@ function renderChart(series) {
         ticks: { color: getCSS('--qpf') },
         grid: { display:false }
       }
-    },
-    onHover(evt, elems){
-      const p = chart?.getElementsAtEventForMode(evt, 'index', {intersect:false}, true);
-      if (p && p.length){
-        const i = p[0].index;
-        updateHoverReadout(series, i);
-      }
     }
   };
 
   if (chart) chart.destroy();
   chart = new Chart(ctx, { type: 'line', data, options });
+
+  // Manual hover/readout to guarantee behavior even when no elements become 'active'
+  const updateFromPixel = (evt) => {
+    const xScale = chart.scales.x;
+    if (!xScale) return;
+    const rect = chart.canvas.getBoundingClientRect();
+    const x = (evt.touches && evt.touches[0]) ? (evt.touches[0].clientX - rect.left) : (evt.clientX - rect.left);
+    const ts = xScale.getValueForPixel(x);
+    if (!ts) return;
+    // Find nearest index in tAxis
+    const tArr = series.tAxis;
+    let lo = 0, hi = tArr.length - 1, mid;
+    while (hi - lo > 1) {
+      mid = (hi + lo) >> 1;
+      if (tArr[mid] < ts) lo = mid; else hi = mid;
+    }
+    const idx = (Math.abs(tArr[lo] - ts) < Math.abs(tArr[hi] - ts)) ? lo : hi;
+    updateHoverReadout(series, idx);
+  };
+  chart.canvas.addEventListener('mousemove', updateFromPixel);
+  chart.canvas.addEventListener('touchmove', updateFromPixel, { passive: true });
 }
 
 function updateHoverReadout(series, i){
@@ -385,6 +393,7 @@ async function showForecast(lat, lon, labelOverride){
 
     renderDailyCards(daily);
     const series = buildChartDatasets(grid);
+    lastSeries = series;
     renderChart(series);
 
   }catch(err){
@@ -411,7 +420,6 @@ async function useBrowserLocation(){
   );
 }
 
-// Search handlers
 els.form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const q = els.input.value.trim();
@@ -425,5 +433,4 @@ els.form.addEventListener('submit', async (e) => {
 });
 els.myLocBtn.addEventListener('click', () => useBrowserLocation());
 
-// Init
 useBrowserLocation();

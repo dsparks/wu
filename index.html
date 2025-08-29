@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Forecast (NWS) — Hoverable 7–10 Day View</title>
+  <title>Forecast (NWS) — WUnderground-Style</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Client-side NWS forecast viewer with hoverable timeseries." />
   <link rel="stylesheet" href="styles.css" />
@@ -14,7 +14,7 @@
 <body>
   <header class="topbar">
     <div class="brand">Forecast</div>
-    <form id="searchForm" class="search">
+    <form id="searchForm" class="search" autocomplete="off">
       <input id="searchInput" type="text" placeholder="Search city, state or ZIP…" aria-label="Search city, state or ZIP" />
       <button type="submit" title="Search">Search</button>
       <button type="button" id="useMyLocation" title="Use my location">📍</button>
@@ -30,6 +30,7 @@
     <section id="days" class="days" aria-label="Daily overview cards (daytime periods)"></section>
 
     <section class="chart-wrap">
+      <!-- IMPORTANT: parent has fixed height; canvas fills it to prevent stretch -->
       <canvas id="forecastChart" aria-label="Hourly weather timeseries" role="img"></canvas>
       <div id="hoverReadout" class="hover-readout" aria-live="polite"></div>
     </section>
@@ -45,19 +46,10 @@
       <span class="legend-item qpf">Hourly Liquid (in)</span>
       <span class="legend-item qpfacc">Precip Accum (in)</span>
     </section>
-
-    <details class="note">
-      <summary>Notes</summary>
-      <ul>
-        <li>Data source: <a target="_blank" rel="noopener" href="https://api.weather.gov/">NWS API</a> (forecast & gridpoint endpoints).</li>
-        <li>Hourly grid data from NWS typically covers ~7 days, so horizon may be shorter than 10.</li>
-        <li>If geolocation is blocked, use the search box (ZIP, e.g. 02139; or a place like “Bar Harbor, ME”).</li>
-      </ul>
-    </details>
   </main>
 
   <footer>
-    <small>Built for GitHub Pages; client-side only. NWS data © NOAA.</small>
+    <small>Client-side only. Data: NWS/NOAA.</small>
   </footer>
 
   <script src="app.js"></script>
