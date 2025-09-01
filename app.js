@@ -40,7 +40,7 @@ function goldenFromApi(goldenStr){
 async function fetchSunForDate(lat, lon, isoDate){
   const key = `${lat.toFixed(5)},${lon.toFixed(5)},${isoDate}`;
   if (sunCache.has(key)) return sunCache.get(key);
-  const url = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lon}&date=${isoDate}&timezone=${encodeURIComponent(localTZ)}`;
+  const url = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lon}&date=${isoDate}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('Sun API error');
   const js = await res.json();
@@ -63,9 +63,11 @@ function renderSunTable(days, lat, lon){
     results.forEach((r, idx) => {
       const col = document.createElement('div');
       col.className = 'suntimes-col';
+      const dawn = parseClock(r?.dawn || r?.first_light);
       const sunrise = parseClock(r?.sunrise);
       const solarnoon = parseClock(r?.solar_noon);
       const sunset = parseClock(r?.sunset);
+      const dusk = parseClock(r?.dusk || r?.last_light);
       const golden = parseClock(r?.golden_hour);
 
       // Header with Weekday, M/D
@@ -76,10 +78,12 @@ function renderSunTable(days, lat, lon){
       col.appendChild(header);
 
       const vals = [
+        {cls:'dawn', txt:dawn, label:'Dawn'},
         {cls:'sunrise', txt:sunrise, label:'Sunrise'},
         {cls:'solarnoon', txt:solarnoon, label:'Solar noon'},
         {cls:'golden', txt:golden, label:'Golden hour'},
         {cls:'sunset', txt:sunset, label:'Sunset'},
+        {cls:'dusk', txt:dusk, label:'Dusk'},
       ];
 
       vals.forEach(v => {
@@ -390,6 +394,17 @@ function makeFacetChart(canvas, cfg){
   return ch;
 }
 
+
+function destroyAllCharts(){
+  for (const k of Object.keys(charts)){
+    try { charts[k]?.destroy(); } catch(e){ /* ignore */ }
+  }
+  charts = {};
+}
+
+
+
+
 function sizeCanvasToParent(canvas){
   const parent = canvas.parentElement;
   const width = Math.floor(parent.clientWidth - 20);
@@ -458,6 +473,7 @@ async function loadByLatLon(lat, lon) {
 }
 
 function buildAllCharts(series){
+  destroyAllCharts();
   Object.values(els.canvases).forEach(c => c && sizeCanvasToParent(c));
   const labels = series.tAxis;
 
@@ -525,6 +541,7 @@ function buildAllCharts(series){
   });
   // Sun facet: show table aligned to other charts
   els.sunFacet.style.display = '';
+  if (els.sunTable) els.sunTable.innerHTML='';
   // Build days from dayDivs; include next 7 day midnights or taken from labels
   const dayMidnights = (series.dayDivs || []).map(ms => new Date(ms));
   let days = dayMidnights.slice(0, 7);

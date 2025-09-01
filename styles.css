@@ -114,7 +114,7 @@ canvas{display:block; width:100%}
 }
 .suntimes-col{
   display:grid;
-  grid-template-rows: auto repeat(4, 1fr);
+  grid-template-rows: auto repeat(6, 1fr);
   border-left:1px solid var(--grid);
 }
 .suntimes-cell{
@@ -132,10 +132,10 @@ canvas{display:block; width:100%}
   margin-right:.25rem;
 }
 .suntimes-labels .suntimes-cell{ justify-content:flex-start; padding-left:.25rem; color:var(--muted); }
-.sunrise{ background: linear-gradient(180deg,#0a2540,#5b2c6f,#ff4e00,#ffd166); ; color:#fff; }
-.solarnoon{ background: linear-gradient(180deg,#fff59d,#ffffff,#fff59d); }
-.golden{ background: linear-gradient(180deg,#fff59d,#f59e0b); }
-.sunset{ background: linear-gradient(180deg,#ff7f50,#ff4757,#d63384,#4338ca,#0a2540); ; color:#fff; }
+.sunrise{ background: linear-gradient(180deg,#1e3a8a,#e11d48,#f97316); }
+.solarnoon{ background: linear-gradient(180deg,#f97316,#fde047,#ffffff,#fde047); }
+.golden{ background: linear-gradient(180deg,#fde047,#f59e0b,#f97316); }
+.sunset{ background: linear-gradient(180deg,#f97316,#e11d48,#1e3a8a); }
 @media (max-width: 640px){
   .suntimes-labels{ display:none; }
 }
@@ -152,6 +152,15 @@ canvas{display:block; width:100%}
 
 .suntimes-cell.sunrise small,
 .suntimes-cell.sunset small{
+  color:#ffffff;
+  text-shadow:0 1px 1px rgba(0,0,0,.45);
+}
+
+/* Extended rows: Dawn + Dusk */
+.dawn{ background: linear-gradient(180deg,#000000,#1e3a8a); }
+.dusk{ background: linear-gradient(180deg,#1e3a8a,#000000); }
+.suntimes-cell.dawn small,
+.suntimes-cell.dusk small{
   color:#ffffff;
   text-shadow:0 1px 1px rgba(0,0,0,.45);
 }
