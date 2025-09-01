@@ -96,3 +96,62 @@ canvas{display:block; width:100%}
 .facet-title .qpf{color:var(--qpf); font-weight:600;}
 .facet-title .wind{color:var(--wind); font-weight:600;}
 .facet-title .press{color:var(--press); font-weight:600;}
+
+
+/* === Sun Times facet === */
+#facet-sun .facet-title .sun{ color:#d97706; font-weight:600; } /* amber */
+.suntimes-table{
+  width:100%;
+  box-sizing:border-box;
+  padding:0 .25rem .5rem .25rem;
+  font-family: ui-monospace,Consolas,Menlo,monospace;
+}
+.suntimes-grid{
+  display:grid;
+  grid-auto-flow:column;
+  grid-auto-columns: 1fr;
+  gap:.25rem;
+}
+.suntimes-col{
+  display:grid;
+  grid-template-rows: auto repeat(4, 1fr);
+  border-left:1px solid var(--grid);
+}
+.suntimes-cell{
+  display:flex; align-items:center; justify-content:center;
+  height: 26px;
+  border-top:1px solid var(--grid);
+  font-size:.88rem;
+  color:#111827;
+}
+.suntimes-cell small{opacity:.85}
+.suntimes-labels{
+  display:grid; grid-template-rows: repeat(4, 1fr);
+  gap:0;
+  width: 7.5rem;
+  margin-right:.25rem;
+}
+.suntimes-labels .suntimes-cell{ justify-content:flex-start; padding-left:.25rem; color:var(--muted); }
+.sunrise{ background: linear-gradient(180deg,#0a2540,#5b2c6f,#ff4e00,#ffd166); ; color:#fff; }
+.solarnoon{ background: linear-gradient(180deg,#fff59d,#ffffff,#fff59d); }
+.golden{ background: linear-gradient(180deg,#fff59d,#f59e0b); }
+.sunset{ background: linear-gradient(180deg,#ff7f50,#ff4757,#d63384,#4338ca,#0a2540); ; color:#fff; }
+@media (max-width: 640px){
+  .suntimes-labels{ display:none; }
+}
+
+.suntimes-header{
+  font-size:.82rem;
+  color:var(--muted);
+  text-align:center;
+  padding:.25rem 0 .3rem 0;
+  border-top:1px solid var(--grid);
+  border-bottom:1px solid var(--grid);
+  background:#f8fafc;
+}
+
+.suntimes-cell.sunrise small,
+.suntimes-cell.sunset small{
+  color:#ffffff;
+  text-shadow:0 1px 1px rgba(0,0,0,.45);
+}

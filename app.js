@@ -16,10 +16,87 @@ const els = {
     wind: document.getElementById('chart-wind'),
     press: document.getElementById('chart-press'),
   },
-  pressFacet: document.getElementById('facet-press'),
+  sunFacet: document.getElementById('facet-sun'),
+  sunTable: document.getElementById('suntimes-table'),
 };
 
 let CROSSHAIR_TS = null;
+
+// === Sun Times helpers ===
+const localTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const sunCache = new Map(); // key: `${lat},${lon},${date}` -> data
+
+function dateISO(d){ return d.toISOString().slice(0,10); }
+function parseClock(s){
+  if (!s) return '—';
+  const m = s.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+  return m ? m[1] : s;
+}
+function goldenFromApi(goldenStr){
+  if (!goldenStr) return '—';
+  const m = goldenStr.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+  return m ? m[1] : parseClock(goldenStr);
+}
+async function fetchSunForDate(lat, lon, isoDate){
+  const key = `${lat.toFixed(5)},${lon.toFixed(5)},${isoDate}`;
+  if (sunCache.has(key)) return sunCache.get(key);
+  const url = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lon}&date=${isoDate}&timezone=${encodeURIComponent(localTZ)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Sun API error');
+  const js = await res.json();
+  const out = js && js.results ? js.results : null;
+  sunCache.set(key, out);
+  return out;
+}
+
+function renderSunTable(days, lat, lon){
+  // days: array of Date objects at local midnight
+  const host = els.sunTable;
+  if (!host) return;
+  host.innerHTML = '';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'suntimes-grid';
+
+    // One column per day
+  Promise.all(days.map(d => fetchSunForDate(lat, lon, dateISO(d)))).then(results => {
+    results.forEach((r, idx) => {
+      const col = document.createElement('div');
+      col.className = 'suntimes-col';
+      const sunrise = parseClock(r?.sunrise);
+      const solarnoon = parseClock(r?.solar_noon);
+      const sunset = parseClock(r?.sunset);
+      const golden = parseClock(r?.golden_hour);
+
+      // Header with Weekday, M/D
+      const d = days[idx];
+      const header = document.createElement('div');
+      header.className = 'suntimes-header';
+      header.textContent = d.toLocaleDateString('en-US', {weekday:'short', month:'numeric', day:'numeric'});
+      col.appendChild(header);
+
+      const vals = [
+        {cls:'sunrise', txt:sunrise, label:'Sunrise'},
+        {cls:'solarnoon', txt:solarnoon, label:'Solar noon'},
+        {cls:'golden', txt:golden, label:'Golden hour'},
+        {cls:'sunset', txt:sunset, label:'Sunset'},
+      ];
+
+      vals.forEach(v => {
+        const cell = document.createElement('div');
+        cell.className = `suntimes-cell ${v.cls}`;
+        cell.innerHTML = `<small>${v.txt}</small>`;
+        cell.title = `${v.label}: ${v.txt}`;
+        col.appendChild(cell);
+      });
+      wrap.appendChild(col);
+    });
+    host.appendChild(wrap);
+  }).catch(err => {
+    host.textContent = 'Sun times unavailable.';
+  });
+}
+
 let charts = {};
 let lastSeries = null;
 
@@ -446,23 +523,14 @@ function buildAllCharts(series){
       y: { position:'left', ticks:{ color:getCSS('--wind') }, grid:{ color:getCSS('--grid') } }
     }
   });
-
-  if (series.pressure){
-    els.pressFacet.style.display = '';
-    charts.press = makeFacetChart(els.canvases.press, {
-      labels, nightBands: series.nightBands, dayDivs: series.dayDivs,
-      datasets: [
-        { label:'Pressure (inHg)', data: series.pressure, borderColor:getCSS('--press'), backgroundColor:'transparent', yAxisID:'y', tension:0.2, pointRadius:0, spanGaps:true },
-      ],
-      scales: {
-        x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
-        y: { position:'left', ticks:{ color:getCSS('--press') }, grid:{ color:getCSS('--grid') } }
-      }
-    });
-  } else {
-    els.pressFacet.style.display = 'none';
-  }
-
+  // Sun facet: show table aligned to other charts
+  els.sunFacet.style.display = '';
+  // Build days from dayDivs; include next 7 day midnights or taken from labels
+  const dayMidnights = (series.dayDivs || []).map(ms => new Date(ms));
+  let days = dayMidnights.slice(0, 7);
+  if (days.length === 0){ const today = new Date(); today.setHours(0,0,0,0); days = Array.from({length:7}, (_,i)=> new Date(today.getTime()+i*24*3600*1000)); }
+  // grid.geometry.coordinates is [lon, lat] per GeoJSON
+  renderSunTable(days, CURRENT_LAT, CURRENT_LON);
   // Crosshair + hover: attach to **all** canvases
   const moveFromCanvas = (canvasKey) => (evt) => {
     const ch = charts[canvasKey];
@@ -502,6 +570,7 @@ function hexWithAlpha(hex, alpha){
 }
 
 async function showForecast(lat, lon, labelOverride){
+  CURRENT_LAT = lat; CURRENT_LON = lon;
   els.place.textContent = 'Loading…';
   els.updated.textContent = '';
 
