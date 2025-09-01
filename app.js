@@ -14,6 +14,7 @@ const els = {
     hcp: document.getElementById('chart-hcp'),
     precip: document.getElementById('chart-precip'),
     wind: document.getElementById('chart-wind'),
+    runindex: document.getElementById('chart-runindex'),
     press: document.getElementById('chart-press'),
   },
   sunFacet: document.getElementById('facet-sun'),
@@ -114,6 +115,12 @@ const fmtIn = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2
 const fmtMph = v => (v == null ? '—' : `${Math.round(v)} mph`);
 const fmtInHg = v => (v == null ? '—' : `${(Math.round(v * 100) / 100).toFixed(2)} inHg`);
 const fmtHour = ms => new Date(ms).toLocaleString([], {hour:'numeric'});
+const fmtDowHour = ms => {
+  const d = new Date(ms);
+  const wd = d.toLocaleDateString([], {weekday:'short'});
+  const hr = d.toLocaleString([], {hour:'numeric'});
+  return `${wd} ${hr}`; // e.g., Mon 2 PM
+};
 
 function parseValidTime(validTime) {
   const [startIso, durationIso] = validTime.split('/');
@@ -219,6 +226,36 @@ function precipDescriptor(qpfIn, isSnow, snowIn){
   }
 }
 
+
+// Running Optimality Index (0–100; higher is better)
+function runningOptimalityIndex({ T, DP, RH, PoP, Pamt, Wind }) {
+  const tanh = (x) => Math.tanh(x);
+
+  // Penalties
+  const pT    = tanh(Math.abs(T - 55) / 15);                 // temp U-shape
+  const pDP   = tanh(Math.max(0, DP - 55) / 7);              // muggy air
+  const pCold = tanh(Math.max(0, 40 - T) / 20 + Math.max(0, 10 - DP) / 10); // very cold/dry
+
+  // Precip: Option A+
+  // Core ramp gets steep after ~0.02 in/hr, then a small extra penalty for amounts beyond 0.02
+  const amt = Pamt || 0;
+  const core = PoP * (1 - Math.exp(- amt / 0.02));                     // main ramp
+  const extra = PoP * 0.10 * tanh(Math.max(0, amt - 0.02) / 0.03);     // + up to ~0.10 when >0.02 in/hr
+  const pPrecip = Math.min(1, core + extra);
+
+  // Wind: help when hot, hurt when cold
+  const bWind = (T >= 65) ? tanh(Wind / 12) : 0;             // benefit in heat
+  const pWind = (T <= 45) ? tanh(Math.max(0, Wind - 5) / 10) : 0; // penalty in cold
+
+  // Combine
+  const pBase    = 0.50 * pT + 0.30 * pDP + 0.20 * pCold;
+  const pWindAdj = pBase * (1 - 0.35 * bWind) + 0.20 * pWind;
+  const pFinal   = Math.min(1, pWindAdj + 0.50 * pPrecip);   // 50% weight on precip (Option A baseline)
+
+  // 0–100 score
+  return 100 * (1 - pFinal);
+}
+
 function buildSeries(grid, hourly) {
   const g = grid.properties;
   const temp = expandHourly(g.temperature.values, c2f);
@@ -272,6 +309,7 @@ function buildSeries(grid, hourly) {
     temperature: [], dewpoint: [], humidity: [], cloud: [], pop: [],
     qpfHourly: [], wind: [], pressure: press ? [] : null,
     snowfall: snowfall ? [] : null,
+    runIndex: [],
   };
 
   tAxis.forEach(ms => {
@@ -284,6 +322,16 @@ function buildSeries(grid, hourly) {
     series.wind.push(at(wspd, ms));
     if (press) series.pressure.push(at(press, ms));
     if (snowfall) series.snowfall.push(at(snowfall, ms));
+
+    // Compute Run Index (0–100)
+    const T = series.temperature[series.temperature.length-1];
+    const DP = series.dewpoint[series.dewpoint.length-1];
+    const RH = (series.humidity[series.humidity.length-1] ?? 0) / 100;      // 0–1
+    const PoP = (series.pop[series.pop.length-1] ?? 0) / 100;               // 0–1
+    const Pamt = series.qpfHourly[series.qpfHourly.length-1] ?? 0;          // inches/hr
+    const Wind = series.wind[series.wind.length-1] ?? 0;                    // mph
+
+    series.runIndex.push(runningOptimalityIndex({ T, DP, RH, PoP, Pamt, Wind }));
   });
 
   return series;
@@ -311,7 +359,7 @@ function makeFacetChart(canvas, cfg){
           displayColors: true,
           boxPadding: 4,
           callbacks: {
-            title(items){ const i = items[0].dataIndex; return fmtHour(cfg.labels[i]); },
+            title(items){ const i = items[0].dataIndex; return fmtDowHour(cfg.labels[i]); },
             label: (cfg.tooltipLabel || ((c)=>` ${c.dataset.label}: ${c.raw}`)),
             labelColor(ctx){
               const col = ctx.dataset.borderColor || '#111827';
@@ -431,7 +479,8 @@ function updateReadout(series, ts){
   ];
   if (series.pressure) parts.push(`Press ${fmtInHg(series.pressure[idx])}`);
   if (series.qpfHourly[idx] != null) parts.push(`QPF ${fmtIn(series.qpfHourly[idx])}`);
-  els.hoverReadout.textContent = parts.join(' | ');
+  if (series.runIndex && series.runIndex[idx] != null) parts.push(`RunIdx ${Math.round(series.runIndex[idx])}`);
+els.hoverReadout.textContent = parts.join(' | ');
 }
 
 async function geocodeQuery(q) {
@@ -539,7 +588,23 @@ function buildAllCharts(series){
       y: { position:'left', ticks:{ color:getCSS('--wind') }, grid:{ color:getCSS('--grid') } }
     }
   });
-  // Sun facet: show table aligned to other charts
+  
+
+  
+
+  charts.runindex = makeFacetChart(els.canvases.runindex, {
+    labels, nightBands: series.nightBands, dayDivs: series.dayDivs, dateCenters: series.dateCenters,
+    datasets: [
+      { label:'Run Index (0–100)', data: series.runIndex, borderColor:getCSS('--run'),
+        backgroundColor:'transparent', yAxisID:'y', tension:0.3, pointRadius:0, spanGaps:true },
+    ],
+    scales: {
+      x: { type:'time', time:{ unit:'hour' }, ticks:{ color:'#6b7280' }, grid:{ color:getCSS('--grid') } },
+      y: { position:'left', min:0, max:100, ticks:{ color:getCSS('--run') }, grid:{ color:getCSS('--grid') } }
+    }
+  });
+
+// Sun facet: show table aligned to other charts
   els.sunFacet.style.display = '';
   if (els.sunTable) els.sunTable.innerHTML='';
   // Build days from dayDivs; include next 7 day midnights or taken from labels
