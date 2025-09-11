@@ -11,7 +11,6 @@ const els = {
   myLocBtn: document.getElementById('useMyLocation'),
   canvases: {
     temp: document.getElementById('chart-temp'),
-    heatmap: document.getElementById('chart-heatmap'),
     hcp: document.getElementById('chart-hcp'),
     precip: document.getElementById('chart-precip'),
     wind: document.getElementById('chart-wind'),
@@ -526,6 +525,9 @@ function buildAllCharts(series){
   destroyAllCharts();
   Object.values(els.canvases).forEach(c => c && sizeCanvasToParent(c));
   const labels = series.tAxis;
+  // Render DOM heatmap (table)
+  const heatHost = document.getElementById('heatmapDom');
+  if (heatHost) renderHeatmapDOM(heatHost, series);
   if (els.canvases.heatmap){ renderHeatmap(els.canvases.heatmap, series); }
 
 
@@ -805,6 +807,154 @@ function renderHeatmap(canvas, series){
   }
   ctx.restore();
 }
+
+// === DOM/Table Heatmap Renderer ===
+function fmtHourShort(h){
+  if (h===0) return '12a';
+  if (h<12) return h+'a';
+  if (h===12) return '12p';
+  return (h-12)+'p';
+}
+
+function renderHeatmapDOM(host, series){
+  if (!host || !series || !series.tAxis?.length) return;
+  host.innerHTML = '';
+
+  // Build day starts (local midnights) for up to 7 rows
+  const tArr = series.tAxis;
+  const times = tArr.map(ms => new Date(ms));
+  const dayStarts = [];
+  for (let i=0;i<times.length;i++){
+    const d=times[i];
+    const m = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0,0,0,0).getTime();
+    if (i===0 || m !== dayStarts[dayStarts.length-1]) dayStarts.push(m);
+  }
+  const rows = Math.min(7, dayStarts.length);
+
+  // floor index helper
+  const idxFloor = (arr, v) => {
+    let lo=0, hi=arr.length-1, ans=0;
+    if (!arr.length || v < arr[0]) return 0;
+    while (lo<=hi){ const mid=(lo+hi)>>1; if (arr[mid] <= v){ ans=mid; lo=mid+1; } else { hi=mid-1; } }
+    return ans;
+  };
+
+  // Table
+  const table = document.createElement('table');
+  table.className = 'heatmap-table';
+  table.setAttribute('role','table');
+  table.setAttribute('aria-label','Hourly heatmap by day');
+  // Colgroup: 1 label col + 24 hour cols
+  const colgroup = document.createElement('colgroup');
+  const colLabel = document.createElement('col'); colLabel.style.width='84px'; colgroup.appendChild(colLabel);
+  for (let c=0;c<24;c++){ const col=document.createElement('col'); colgroup.appendChild(col); }
+  table.appendChild(colgroup);
+
+  // THEAD with hour labels
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  const th0 = document.createElement('th'); th0.className='rowlabel'; th0.scope='col'; th0.textContent=''; hr.appendChild(th0);
+  for (let c=0;c<24;c++){ const th=document.createElement('th'); th.scope='col'; th.textContent=fmtHourShort(c); hr.appendChild(th); }
+  thead.appendChild(hr); table.appendChild(thead);
+
+  // TBODY rows
+  const tbody = document.createElement('tbody');
+  for (let r=0;r<rows;r++){
+    const tr = document.createElement('tr');
+    // Row label (day/date)
+    const d = new Date(dayStarts[r]);
+    const rlabel = d.toLocaleDateString([], { weekday:'short', month:'numeric', day:'numeric' });
+    const th = document.createElement('th'); th.className='rowlabel'; th.scope='row'; th.textContent=rlabel; tr.appendChild(th);
+
+    for (let c=0;c<24;c++){
+      const td = document.createElement('td'); td.className='hm-cell'; td.setAttribute('data-hour', String(c));
+      const ts = dayStarts[r] + c*3600*1000;
+      const idx = idxFloor(tArr, ts);
+      const T   = series.temperature[idx];
+      const DP  = series.dewpoint[idx];
+      const PoP = series.pop[idx] ?? 0;
+      const qpf = series.qpfHourly[idx] ?? 0;
+      const snow = series.snowfall ? (series.snowfall[idx] ?? 0) : 0;
+      const isSnow = snow > 0;
+      const label = precipDescriptor(qpf, isSnow, snow);
+
+      // Background by temperature
+      td.style.backgroundColor = tempToHex(T);
+      // Occlusion using ::after height via CSS var
+      td.style.setProperty('--popH', (PoP|0) + '%');
+
+      // Accessible cell text
+      const when = new Date(tArr[idx]).toLocaleString([], {weekday:'short', month:'numeric', day:'numeric', hour:'numeric'});
+      td.setAttribute('title', `${when}  Temp ${fmtF(T)}  Dew ${fmtF(DP)}  PoP ${fmtPct(PoP)}  ${label}`.trim());
+      td.setAttribute('aria-label', td.getAttribute('title'));
+
+      // Inner overlay + number
+      const inner = document.createElement('div'); inner.className='hm-cell-inner';
+      const num = document.createElement('div'); num.className='hm-temp'; num.textContent = (T==null ? '' : Math.round(T));
+      const occ = document.createElement('div'); occ.className='hm-occlude';
+      inner.appendChild(num); inner.appendChild(occ);
+      td.appendChild(inner);
+
+      // Click: show tooltip, update readout; keyboard accessible
+      td.tabIndex = 0;
+      const openTip = (clientX, clientY) => {
+        const tip = ensureHeatmapTip();
+        tip.innerHTML = `<b>${when}</b><br/>Temp ${fmtF(T)} · Dew ${fmtF(DP)} · PoP ${fmtPct(PoP)}${label ? ' · ' + label : ''}`;
+        tip.style.display = 'block';
+        placeTipNear(tip, clientX, clientY);
+        els.hoverReadout.textContent = td.getAttribute('title');
+        // highlight selection
+        document.querySelectorAll('.hm-cell.is-selected').forEach(el => el.classList.remove('is-selected'));
+        td.classList.add('is-selected');
+      };
+      td.addEventListener('click', (ev) => {
+        openTip(ev.clientX, ev.clientY);
+        ev.stopPropagation();
+      });
+      td.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' '){
+          const rect = td.getBoundingClientRect();
+          openTip(rect.left + rect.width/2, rect.top + rect.height/2);
+          ev.preventDefault(); ev.stopPropagation();
+        }
+      });
+
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+
+  // TFOOT hour labels (bottom)
+  const tfoot = document.createElement('tfoot');
+  const fr = document.createElement('tr');
+  const fth = document.createElement('th'); fth.className='rowlabel'; fth.scope='col'; fth.textContent=''; fr.appendChild(fth);
+  for (let c=0;c<24;c++){ const th=document.createElement('th'); th.scope='col'; th.textContent=fmtHourShort(c); fr.appendChild(th); }
+  tfoot.appendChild(fr); table.appendChild(tfoot);
+
+  host.appendChild(table);
+}
+// --- Tooltip utilities for DOM heatmap (click-to-open) ---
+function ensureHeatmapTip(){
+  let tip = document.getElementById('heatmap-tip');
+  if (!tip){
+    tip = document.createElement('div');
+    tip.id = 'heatmap-tip';
+    document.body.appendChild(tip);
+  }
+  return tip;
+}
+function placeTipNear(tip, clientX, clientY){
+  const pad = 12;
+  let x = clientX + pad, y = clientY + pad;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const rect = tip.getBoundingClientRect();
+  if (x + rect.width + 8 > vw) x = Math.max(8, vw - rect.width - 8);
+  if (y + rect.height + 8 > vh) y = Math.max(8, vh - rect.height - 8);
+  tip.style.left = x + 'px';
+  tip.style.top  = y + 'px';
+}
+
 async function showForecast(lat, lon, labelOverride){
   CURRENT_LAT = lat; CURRENT_LON = lon;
   els.place.textContent = 'Loading…';
@@ -829,6 +979,19 @@ async function showForecast(lat, lon, labelOverride){
   }
 }
 
+
+// Hide heatmap tooltip when clicking outside cells or on Escape
+document.addEventListener('click', (ev) => {
+  const tip = document.getElementById('heatmap-tip');
+  if (!tip) return;
+  if (!(ev.target && ev.target.closest && ev.target.closest('.hm-cell'))){
+    tip.style.display = 'none';
+    document.querySelectorAll('.hm-cell.is-selected').forEach(el => el.classList.remove('is-selected'));
+  }
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape'){ const tip = document.getElementById('heatmap-tip'); if (tip) tip.style.display = 'none'; document.querySelectorAll('.hm-cell.is-selected').forEach(el => el.classList.remove('is-selected')); }
+});
 async function useBrowserLocation(){
   if (!('geolocation' in navigator)) {
     els.updated.textContent = 'Geolocation not supported in this browser.';

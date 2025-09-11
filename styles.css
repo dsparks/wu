@@ -168,3 +168,43 @@ canvas{display:block; width:100%}
 
 /* Heatmap facet */
 .facet[data-facet="heatmap"] canvas{ background:#fff; border-radius:8px; }
+
+/* === DOM/Table Heatmap === */
+.heatmap-dom { overflow-x: auto; overflow-y: visible; }
+.heatmap-table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+.heatmap-table caption { text-align: left; font-size: 0.9rem; color: var(--muted); margin-bottom: .25rem; }
+.heatmap-table th, .heatmap-table td { border: 1px solid rgba(17,24,39,.18); padding: 0; position: relative; }
+.heatmap-table thead th, .heatmap-table tfoot th { 
+  position: sticky; top: 0; background: #fff; z-index: 1; 
+  height: 18px; font-weight: 500; color: #6b7280; font-size: 10px; 
+}
+.heatmap-table tfoot th { position: static; }
+.heatmap-table th.rowlabel { 
+  min-width: 84px; width: 84px; text-align: right; padding-right: 6px; 
+  background: #fff; position: sticky; left: 0; z-index: 2; font-weight: 600; color: #111827;
+}
+.hm-cell { width: 36px; height: 28px; }
+.hm-cell-inner { position: absolute; inset: 0; }
+.hm-temp { position: absolute; left: 50%; transform: translateX(-50%); top: 25%; font-size: 11px; color: rgba(17,17,17,.85); }
+.hm-occlude { position: absolute; left: 0; right: 0; bottom: 0; height: var(--popH, 0%); background: rgba(0,0,0,.8); }
+.hm-cell:hover { outline: 2px solid rgba(37,99,235,.9); outline-offset: -2px; }
+@media (max-width: 720px){
+  .hm-cell { width: 28px; height: 24px; }
+  .heatmap-table th.rowlabel{ min-width: 72px; width: 72px; }
+}
+
+/* Heatmap click tooltip */
+#heatmap-tip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 60;
+  padding: 6px 8px;
+  background: rgba(17,24,39,.95);
+  color: #fff;
+  font: 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Arial;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.25);
+  max-width: 260px;
+  display: none;
+}
+.hm-cell.is-selected { outline: 2px solid rgba(37,99,235,.95); outline-offset: -2px; }
