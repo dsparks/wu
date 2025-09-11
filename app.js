@@ -11,6 +11,7 @@ const els = {
   myLocBtn: document.getElementById('useMyLocation'),
   canvases: {
     temp: document.getElementById('chart-temp'),
+    heatmap: document.getElementById('chart-heatmap'),
     hcp: document.getElementById('chart-hcp'),
     precip: document.getElementById('chart-precip'),
     wind: document.getElementById('chart-wind'),
@@ -525,6 +526,8 @@ function buildAllCharts(series){
   destroyAllCharts();
   Object.values(els.canvases).forEach(c => c && sizeCanvasToParent(c));
   const labels = series.tAxis;
+  if (els.canvases.heatmap){ renderHeatmap(els.canvases.heatmap, series); }
+
 
   const baseTitle = items => fmtHour(labels[items[0].dataIndex]);
 
@@ -651,6 +654,157 @@ function hexWithAlpha(hex, alpha){
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+
+// === Helpers for temperature color and heatmap rendering ===
+function hexToRgb(hex){
+  const h = hex.replace('#','');
+  return { r:parseInt(h.slice(0,2),16), g:parseInt(h.slice(2,4),16), b:parseInt(h.slice(4,6),16) };
+}
+function rgbToHex(r,g,b){
+  const c=v=>Math.max(0,Math.min(255,v|0)).toString(16).padStart(2,'0');
+  return '#' + c(r)+c(g)+c(b);
+}
+function srgbToLin(u){ u/=255; return u<=0.04045 ? (u/12.92) : Math.pow((u+0.055)/1.055,2.4); }
+function linToSrgb(u){ return u<=0.0031308 ? (u*12.92) : (1.055*Math.pow(u,1/2.4)-0.055); }
+function linRgbToXyz(r,g,b){
+  r=srgbToLin(r); g=srgbToLin(g); b=srgbToLin(b);
+  return {
+    x:r*0.4124564 + g*0.3575761 + b*0.1804375,
+    y:r*0.2126729 + g*0.7151522 + b*0.0721750,
+    z:r*0.0193339 + g*0.1191920 + b*0.9503041
+  };
+}
+function xyzToLinRgb(x,y,z){
+  let r =  3.2404542*x -1.5371385*y -0.4985314*z;
+  let g = -0.9692660*x +1.8760108*y +0.0415560*z;
+  let b =  0.0556434*x -0.2040259*y +1.0572252*z;
+  r = Math.round(linToSrgb(r)*255); g = Math.round(linToSrgb(g)*255); b = Math.round(linToSrgb(b)*255);
+  return {r,g,b};
+}
+const REF_X = 0.95047, REF_Y = 1.0, REF_Z = 1.08883;
+function fLab(t){ return t>Math.pow(6/29,3) ? Math.cbrt(t) : (t*(29/6)*(29/6)/3 + 4/29); }
+function finvLab(t){ const t3=t*t*t, k=Math.pow(6/29,3); return t3>k ? t3 : 3*Math.pow(6/29,2)*(t-4/29); }
+function xyzToLab(x,y,z){ const fx=fLab(x/REF_X), fy=fLab(y/REF_Y), fz=fLab(z/REF_Z); return { L:116*fy-16, a:500*(fx-fy), b:200*(fy-fz) }; }
+function labToXyz(L,a,b){ const fy=(L+16)/116, fx=fy+a/500, fz=fy-b/200; return { x:finvLab(fx)*REF_X, y:finvLab(fy)*REF_Y, z:finvLab(fz)*REF_Z }; }
+function interpLab(c0,c1,t){
+  const r0=hexToRgb(c0), r1=hexToRgb(c1);
+  const {x:x0,y:y0,z:z0}=linRgbToXyz(r0.r,r0.g,r0.b);
+  const {x:x1,y:y1,z:z1}=linRgbToXyz(r1.r,r1.g,r1.b);
+  const L0=xyzToLab(x0,y0,z0), L1=xyzToLab(x1,y1,z1);
+  const L=L0.L+(L1.L-L0.L)*t, a=L0.a+(L1.a-L0.a)*t, b=L0.b+(L1.b-L0.b)*t;
+  const {x,y,z}=labToXyz(L,a,b);
+  const {r,g,b:bb}=xyzToLinRgb(x,y,z);
+  return rgbToHex(r,g,bb);
+}
+function tempToHex(tempF){
+  const stops=[0,30,40,50,60,70,80,90,110];
+  const cols =['#FFFFFF','#7B2CBF','#1E40AF','#06B6D4','#A3E635','#FACC15','#FF8C00','#DC2626','#FFFFFF'];
+  if (tempF==null || isNaN(tempF)) return '#f3f4f6';
+  if (tempF<=stops[0]) return cols[0];
+  if (tempF>=stops[stops.length-1]) return cols[cols.length-1];
+  let i=0; for (let k=0;k<stops.length-1;k++){ if (tempF>=stops[k] && tempF<stops[k+1]){ i=k; break; } }
+  const t0=stops[i], t1=stops[i+1];
+  const frac=(tempF-t0)/(t1-t0);
+  return interpLab(cols[i], cols[i+1], frac);
+}
+function renderHeatmap(canvas, series){
+  if (!canvas || !series) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  const leftMargin=76, rightMargin=6, topMargin=18, bottomMargin=18;
+  const innerW = Math.max(1, W - leftMargin - rightMargin);
+  const innerH = Math.max(1, H - topMargin - bottomMargin);
+
+  const tAxis = series.tAxis;
+  const times = tAxis.map(ms => new Date(ms));
+
+  // floor index via binary search
+  const idxFloor = (arr, v) => {
+    let lo=0, hi=arr.length-1, ans=0;
+    if (!arr.length || v < arr[0]) return 0;
+    while (lo<=hi){
+      const mid=(lo+hi)>>1;
+      if (arr[mid] <= v){ ans=mid; lo=mid+1; } else { hi=mid-1; }
+    }
+    return ans;
+  };
+
+  // rows by midnight
+  const dayStarts=[];
+  for (let i=0;i<times.length;i++){
+    const d=times[i];
+    const m = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+    if (i===0 || m !== dayStarts[dayStarts.length-1]) dayStarts.push(m);
+  }
+  const rows = Math.min(7, dayStarts.length);
+  const tileW = innerW/24;
+  const tileH = innerH/rows;
+
+  // background
+  ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,H);
+
+  // tiles
+  for (let r=0;r<rows;r++){
+    const midnight = dayStarts[r];
+    for (let c=0;c<24;c++){
+      const ts = midnight + c*3600*1000;
+      const idx = idxFloor(tAxis, ts);
+      const T = series.temperature[idx];
+      const pop = (series.pop[idx] ?? 0) / 100;
+      const x = leftMargin + c*tileW;
+      const y = topMargin + r*tileH;
+
+      ctx.fillStyle = tempToHex(T);
+      ctx.fillRect(x, y, tileW, tileH);
+
+      ctx.strokeStyle='rgba(17,24,39,0.25)';
+      ctx.lineWidth=1;
+      ctx.strokeRect(Math.floor(x)+0.5, Math.floor(y)+0.5, Math.ceil(tileW)-1, Math.ceil(tileH)-1);
+
+      const hOcc = pop * tileH;
+      if (hOcc>0){
+        ctx.fillStyle='rgba(0,0,0,0.80)';
+        ctx.fillRect(x, y + tileH - hOcc, tileW, hOcc);
+      }
+
+      if (T!=null){
+        ctx.fillStyle='rgba(17,17,17,0.85)';
+        ctx.font='11px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Arial';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        const yLabel = y + tileH*0.25; // 3/4 up
+        ctx.fillText(String(Math.round(T)), x + tileW/2, yLabel);
+      }
+    }
+  }
+
+  // hour labels top+bottom (every hour)
+  ctx.save();
+  ctx.fillStyle='#6b7280';
+  ctx.font='10px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Arial';
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  for (let c=0;c<24;c++){
+    const hour = c===0 ? '12a' : (c<12 ? c+'a' : (c===12 ? '12p' : (c-12)+'p'));
+    const cx = leftMargin + c*tileW + tileW/2;
+    ctx.fillText(hour, cx, 2);
+    ctx.fillText(hour, cx, H - bottomMargin + 2);
+  }
+  ctx.restore();
+
+  // day labels left
+  ctx.save();
+  ctx.fillStyle='#111827';
+  ctx.font='12px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Arial';
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  for (let r=0;r<rows;r++){
+    const d = new Date(dayStarts[r]);
+    const label = d.toLocaleDateString([], { weekday:'short', month:'numeric', day:'numeric' });
+    const yMid = topMargin + r*tileH + tileH/2;
+    ctx.fillText(label, leftMargin - 8, yMid);
+  }
+  ctx.restore();
+}
 async function showForecast(lat, lon, labelOverride){
   CURRENT_LAT = lat; CURRENT_LON = lon;
   els.place.textContent = 'Loading…';
